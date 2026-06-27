@@ -7,8 +7,10 @@ Deploy on Render, Railway, or any Python host.
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -490,7 +492,30 @@ async def set_mexc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ========== MAIN ==========
 
+# ========== HEALTH CHECK SERVER (for Render Web Service) ==========
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK\n')
+    def log_message(self, format, *args):
+        pass  # لا نريد ضجة في اللوق
+
+def run_health_server():
+    """تشغيل سيرفر صحي عشان Render يشوف البوت Live"""
+    port = int(os.environ.get('PORT', '10000'))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    import threading
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    logging.info(f"🔌 Health server running on port {port}")
+
+
 def main():
+    # Health check server (Render Web Service compatibility)
+    run_health_server()
+    
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Commands
