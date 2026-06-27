@@ -11,6 +11,7 @@ import os
 import time
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -44,6 +45,25 @@ mexc = MEXC(
 )
 
 
+# ========== HEALTH CHECK SERVER (for Render Web Service) ==========
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK\n')
+    def log_message(self, format, *args):
+        pass  # لا نريد ضجة في اللوق
+
+def run_health_server():
+    """تشغيل سيرفر صحي عشان Render يشوف البوت Live"""
+    port = int(os.environ.get('PORT', '10000'))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    log.info(f"🔌 Health server running on port {port}")
+
+
 # ========== COMMAND HANDLERS ==========
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -61,6 +81,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🎯 استراتيجية: Momentum Continuation\n"
         "⚡ الشرط: Pump ≥ 5% ← شراء فوري\n"
         "🎯 TP: +2% | 🛑 SL: -1%\n"
+        "🔄 Trailing SL: +1% → Breakeven\n"
         "💰 المخاطرة: 100% All-In\n"
         f"📊 المراقبة: {len(COINS)} عملة\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -195,7 +216,6 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     signals_4h = []
 
     for sym in COINS:
-        # Daily scan
         raw_d = mexc.get_klines(sym, '1d', 3)
         if raw_d and isinstance(raw_d, list) and len(raw_d) >= 2:
             try:
@@ -207,13 +227,10 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     entry = float(raw_d[-1][1])
                     current = mexc.get_price(sym)
                     perf = (current / entry - 1) * 100
-                    signals_daily.append(
-                        f"💎 {sym} | {pump:+.1f}% (أمس) | الآن {perf:+.1f}% | دخول ${entry:.6f}"
-                    )
+                    signals_daily.append(f"💎 {sym} | {pump:+.1f}% (أمس) | الآن {perf:+.1f}% | دخول ${entry:.6f}")
             except Exception:
                 pass
 
-        # 4h scan
         raw_4 = mexc.get_klines(sym, '4h', 5)
         if raw_4 and isinstance(raw_4, list) and len(raw_4) >= 2:
             try:
@@ -225,9 +242,7 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     entry_4 = float(raw_4[-1][1])
                     current_4 = mexc.get_price(sym)
                     perf_4 = (current_4 / entry_4 - 1) * 100
-                    signals_4h.append(
-                        f"⚡ {sym} | 4h {pump_4:+.1f}% | الآن {perf_4:+.1f}% | دخول ${entry_4:.6f}"
-                    )
+                    signals_4h.append(f"⚡ {sym} | 4h {pump_4:+.1f}% | الآن {perf_4:+.1f}% | دخول ${entry_4:.6f}")
             except Exception:
                 pass
 
@@ -420,7 +435,7 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
 
     if action == 'BE':
-        icon = '🔄'  # Breakeven — neutral
+        icon = '🔄'
     else:
         icon = '✅' if close_data['pnl'] > 0 else '❌'
 
@@ -492,30 +507,10 @@ async def set_mexc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ========== MAIN ==========
 
-# ========== HEALTH CHECK SERVER (for Render Web Service) ==========
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK\n')
-    def log_message(self, format, *args):
-        pass  # لا نريد ضجة في اللوق
-
-def run_health_server():
-    """تشغيل سيرفر صحي عشان Render يشوف البوت Live"""
-    port = int(os.environ.get('PORT', '10000'))
-    server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    import threading
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    logging.info(f"🔌 Health server running on port {port}")
-
-
 def main():
     # Health check server (Render Web Service compatibility)
     run_health_server()
-    
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Commands
