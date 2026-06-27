@@ -73,15 +73,23 @@ class Scanner:
             'usdt_invested': invest,
             'date': signal['date'],
             'entry_time': datetime.now(timezone.utc).isoformat(),
-            'tp': avg_price * 1.02,
-            'sl': avg_price * 0.99,
+            'tp': avg_price * 1.02,           # +2%
+            'sl': avg_price * 0.99,            # -1% أصلي
+            'trail_trigger': avg_price * 1.01, # +1% → يفعل التريلنغ
+            'sl_trailed': avg_price,           # بعد التفعيل = سعر الدخول
+            'trail_activated': False,          # لسه ما تفعل
             'status': 'OPEN'
         }
 
         return trade, None
 
     def check_tp_sl(self, trade):
-        """Check if TP or SL is hit. Returns 'TP', 'SL', or 'HOLD'"""
+        """Check if TP or SL is hit. Returns 'TP', 'SL', 'BE', or 'HOLD'
+        
+        TRAILING LOGIC:
+        - إذا السعر لمس +1% من سعر الدخول ← الـ SL يتحرك لسعر الدخول (Breakeven)
+        - بعدها ننتظر TP أو Breakeven — لا خسارة بعد التفعيل
+        """
         sym = trade['symbol']
         ticker = self.m.get_ticker(sym)
         if 'error' in ticker:
@@ -95,13 +103,30 @@ class Scanner:
             return 'HOLD'
 
         tp = trade['tp']
+        entry = trade['entry_price']
+        trail_trigger = trade.get('trail_trigger', entry * 1.01)
+        sl_trailed = trade.get('sl_trailed', entry)
+        trail_activated = trade.get('trail_activated', False)
+
+        # === TRAILING: هل السعر لمس +1%؟ ===
+        if not trail_activated:
+            if high >= trail_trigger or current >= trail_trigger:
+                trade['trail_activated'] = True
+                trade['sl'] = sl_trailed  # حرك الـ SL لسعر الدخول
+                trade['trail_time'] = datetime.now(timezone.utc).isoformat()
+                trail_activated = True
+
         sl = trade['sl']
 
         if low <= sl:
+            if trail_activated:
+                return 'BE'
             return 'SL'
         if high >= tp:
             return 'TP'
         if current <= sl:
+            if trail_activated:
+                return 'BE'
             return 'SL'
         if current >= tp:
             return 'TP'

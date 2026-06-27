@@ -417,7 +417,11 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
         st['peak_balance'] = live_bal
     save_state(st)
 
-    icon = '✅' if close_data['pnl'] > 0 else '❌'
+    if action == 'BE':
+        icon = '🔄'  # Breakeven — neutral
+    else:
+        icon = '✅' if close_data['pnl'] > 0 else '❌'
+
     msg = (
         f"{icon} صفقة مقفلة\n"
         f"{'─'*25}\n"
