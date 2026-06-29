@@ -300,6 +300,16 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     live_bal = bingx.get_balance('USDT')
     if live_bal < 1:
         log.warning(f"Balance too low: ${live_bal}")
+        # فحص الإشارات أولاً (بدون شراء) عشان ننبش لو في فرصة ضايعة
+        scanner = Scanner(bingx, st)
+        signal = scanner.scan()
+        if signal:
+            await _notify(ctx, f"💰 تم العثور على إشارة!\n"
+                               f"🔹 {signal['symbol']} | Pump: {signal['pump']:+.1f}%\n"
+                               f"⚠️ لكن الرصيد `$0.00` — تعذر الشراء\n"
+                               f"💵 ارسل USDT لحساب BingX عشان البوت يبدأ 🚀")
+        else:
+            log.info("No signals found (balance: $0)")
         return
     signal = scanner.scan()
     if not signal:
