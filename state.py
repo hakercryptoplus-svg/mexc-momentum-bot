@@ -14,8 +14,8 @@ DEFAULT_STATE = {
     "last_scan_date": None,
     "start_balance": None,
     "peak_balance": 0.0,
-    "binance_api_key": None,
-    "binance_secret_key": None,
+    "mexc_api_key": None,
+    "mexc_secret_key": None,
 }
 
 def load():

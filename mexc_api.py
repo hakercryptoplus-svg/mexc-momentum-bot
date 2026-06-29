@@ -1,6 +1,5 @@
 """
-Binance API wrapper — Private & Public endpoints
-صنع خصيصاً لبوت ALPHA INVESTMENT — 44 Small Caps
+MEXC API wrapper — Private & Public endpoints
 """
 import hashlib
 import hmac
@@ -8,9 +7,9 @@ import time
 import requests
 from urllib.parse import urlencode
 
-BINANCE_BASE = "https://api.binance.com"
+MEXC_BASE = "https://api.mexc.com"
 
-class Binance:
+class MEXC:
     def __init__(self, api_key, secret_key, delay=0.05):
         self.api_key = api_key
         self.secret = secret_key
@@ -28,17 +27,15 @@ class Binance:
 
     def _get(self, path, params=None, signed=False):
         self._rate_limit()
-        url = f"{BINANCE_BASE}{path}"
-        headers = {'X-MBX-APIKEY': self.api_key} if signed and self.api_key else {}
+        url = f"{MEXC_BASE}{path}"
+        headers = {'X-MEXC-APIKEY': self.api_key} if signed and self.api_key else {}
         if signed:
             params = params or {}
             params['timestamp'] = int(time.time() * 1000)
             params['signature'] = self._sign(params)
         try:
             r = requests.get(url, params=params, headers=headers, timeout=15)
-            if r.status_code == 200:
-                return r.json()
-            return {'error': r.status_code, 'msg': r.text[:200]}
+            return r.json() if r.status_code == 200 else {'error': r.status_code, 'msg': r.text[:200]}
         except Exception as e:
             return {'error': -1, 'msg': str(e)}
 
@@ -47,9 +44,9 @@ class Binance:
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
         params['signature'] = self._sign(params)
-        headers = {'X-MBX-APIKEY': self.api_key}
+        headers = {'X-MEXC-APIKEY': self.api_key}
         try:
-            r = requests.post(f"{BINANCE_BASE}{path}", params=params, headers=headers, timeout=15)
+            r = requests.post(f"{MEXC_BASE}{path}", params=params, headers=headers, timeout=15)
             return r.json() if r.status_code == 200 else {'error': r.status_code, 'msg': r.text[:200]}
         except Exception as e:
             return {'error': -1, 'msg': str(e)}
@@ -59,9 +56,9 @@ class Binance:
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
         params['signature'] = self._sign(params)
-        headers = {'X-MBX-APIKEY': self.api_key}
+        headers = {'X-MEXC-APIKEY': self.api_key}
         try:
-            r = requests.delete(f"{BINANCE_BASE}{path}", params=params, headers=headers, timeout=15)
+            r = requests.delete(f"{MEXC_BASE}{path}", params=params, headers=headers, timeout=15)
             return r.json() if r.status_code == 200 else {'error': r.status_code, 'msg': r.text[:200]}
         except Exception as e:
             return {'error': -1, 'msg': str(e)}
@@ -173,6 +170,6 @@ class Binance:
         r = self._get("/api/v3/exchangeInfo", {'symbol': s})
         if 'error' in r: return False
         try:
-            return r['symbols'][0]['status'] == 'TRADING'
+            return r['symbols'][0]['status'] == '1'
         except:
             return False
