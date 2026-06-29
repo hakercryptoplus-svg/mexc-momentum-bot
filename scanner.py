@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from config import MIN_PUMP, COINS, FEE
 
 class Scanner:
-    def __init__(self, mexc, state, notify_func=None):
-        self.m = mexc
+    def __init__(self, exchange, state, notify_func=None):
+        self.m = exchange
         self.state = state
         self.notify = notify_func
         self.coins_to_check = 0

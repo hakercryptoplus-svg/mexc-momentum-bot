@@ -13,19 +13,19 @@ TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', '1.02'))    # +2%
 STOP_LOSS = float(os.getenv('STOP_LOSS', '0.99'))        # -1%
 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # 100% of balance
 MAX_POSITIONS = int(os.getenv('MAX_POSITIONS', '1'))
-FEE = float(os.getenv('FEE', '0.001'))                   # MEXC spot fee (0.1%)
+FEE = float(os.getenv('FEE', '0.001'))                   # Binance spot fee (0.1%)
 
 # === Coin Watchlist (from env, comma-separated, or default 42 coins) ===
 DEFAULT_COINS = [
-    'ADA/USDT', 'AIXDROP/USDT', 'ASTER/USDT', 'ATLA/USDT', 'BEAT/USDT',
-    'BEL/USDT', 'BNB/USDT', 'BTW/USDT', 'CHECK/USDT', 'CLO/USDT',
-    'DN/USDT', 'DOGE/USDT', 'DOT/USDT', 'EIGEN/USDT', 'ETH/USDT',
-    'ETHFI/USDT', 'FIL/USDT', 'GRAM/USDT', 'HYPE/USDT', 'INJ/USDT',
-    'IO/USDT', 'JGGL/USDT', 'LAB/USDT', 'LTC/USDT', 'MBG/USDT',
-    'MX/USDT', 'NEAR/USDT', 'RAIN/USDT', 'SOL/USDT', 'SUI/USDT',
-    'TAO/USDT', 'TNSR/USDT', 'TRUMP/USDT', 'TRX/USDT', 'USDE/USDT',
-    'VELVET/USDT', 'W/USDT', 'WXT/USDT', 'XMR/USDT', 'XPL/USDT',
-    'XRP/USDT', 'ZEC/USDT'
+    'ALICE/USDT', 'CELR/USDT', 'CKB/USDT', 'COTI/USDT', 'DUSK/USDT',
+    'IOST/USDT', 'IOTX/USDT', 'LRC/USDT', 'NKN/USDT', 'ONT/USDT',
+    'RSR/USDT', 'RVN/USDT', 'SLP/USDT', 'STORJ/USDT', 'UMA/USDT',
+    'WOO/USDT', 'YGG/USDT', 'ZIL/USDT', 'ZRX/USDT', 'ANKR/USDT',
+    'ARPA/USDT', 'BAT/USDT', 'ENJ/USDT', 'FET/USDT', 'GALA/USDT',
+    'FLOW/USDT', 'HIVE/USDT', 'KAVA/USDT', 'KSM/USDT', 'LPT/USDT',
+    'MANA/USDT', 'FARM/USDT', 'BEL/USDT', 'RLC/USDT', 'MAGIC/USDT',
+    'RARE/USDT', 'GRT/USDT', 'GTC/USDT', 'XNO/USDT', 'SXP/USDT',
+    'TRU/USDT', 'PENDLE/USDT', 'PEOPLE/USDT', 'STX/USDT'
 ]
 
 _coins_env = os.getenv('COINS')
