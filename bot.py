@@ -210,10 +210,17 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     signals_daily = []
     signals_4h = []
+    api_errors = 0
+    first_sym = True
 
     for sym in COINS:
         raw_d = binance.get_klines(sym, '1d', 3)
-        if raw_d and isinstance(raw_d, list) and len(raw_d) >= 2:
+        if isinstance(raw_d, dict) and 'error' in raw_d:
+            api_errors += 1
+            if first_sym:
+                signals_daily.append(f"⚠️ ERR (مثال {sym}): {raw_d.get('msg', str(raw_d))[:100]}")
+                first_sym = False
+        elif raw_d and isinstance(raw_d, list) and len(raw_d) >= 2:
             try:
                 yesterday = raw_d[-2]
                 open_p = float(yesterday[1])
@@ -228,7 +235,9 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 pass
 
         raw_4 = binance.get_klines(sym, '4h', 5)
-        if raw_4 and isinstance(raw_4, list) and len(raw_4) >= 2:
+        if isinstance(raw_4, dict) and 'error' in raw_4:
+            pass  # 4h قد يكون في error برضه
+        elif raw_4 and isinstance(raw_4, list) and len(raw_4) >= 2:
             try:
                 last = raw_4[-2]
                 open_4 = float(last[1])
@@ -245,6 +254,8 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         time.sleep(0.06)
 
     lines = []
+    if api_errors:
+        lines.append(f"⚠️ **{api_errors}/{len(COINS)} عملة فشل اتصال API!**")
     lines.append("📆 **الفحص اليومي (أمس):**")
     lines.extend(signals_daily[:8] if signals_daily else ["— لا توجد إشارات"])
     lines.append("")
