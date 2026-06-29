@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MEXC Momentum Bot — Telegram Interface
-Automated trading bot for MEXC (42 coins) with Telegram control.
+BingX Momentum Bot — Telegram Interface
+Automated trading bot for BingX (42 coins) with Telegram control.
 Trailing Stop +1% → Breakeven (حماية رأس المال)
 
 Deploy on Render, Railway, or any Python host.
@@ -22,13 +22,13 @@ from config import (
     TELEGRAM_CHAT_ID,
     COINS,
     STATE_FILE,
-    MEXC_API_KEY,
-    MEXC_SECRET_KEY,
+    BINGX_API_KEY,
+    BINGX_SECRET_KEY,
     SCAN_HOUR,
     SCAN_MINUTE,
 )
 from state import load as load_state, save as save_state, reset as reset_state
-from mexc_api import MEXC
+from bingx_api import BingX
 from scanner import Scanner
 
 # === Setup ===
@@ -39,14 +39,14 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 state = load_state()
-mexc = MEXC(
-    state.get('mexc_api_key') or MEXC_API_KEY or "",
-    state.get('mexc_secret_key') or MEXC_SECRET_KEY or "",
+bingx = BingX(
+    state.get('bingx_api_key') or BINGX_API_KEY or "",
+    state.get('bingx_secret_key') or BINGX_SECRET_KEY or "",
     0.05
 )
 
 
-# ========== HEALTH CHECK SERVER (for Render Web Service) ==========
+# ========== HEALTH CHECK SERVER ==========
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -74,14 +74,14 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "╚══════════════════════════════╝\n\n"
         "صنع بواسطة Abozaid™\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "MEXC 🟢 ONLINE\n"
+        "BingX 🟢 ONLINE\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🎯 استراتيجية: Momentum Continuation\n"
         "⚡ الشرط: Pump ≥ 5% ← شراء فوري\n"
         "🎯 TP: +2% | 🛑 SL: -1%\n"
         "🔄 Trailing SL: +1% → Breakeven 🛡️\n"
         "💰 المخاطرة: 100% All-In\n"
-        f"📊 المراقبة: {len(COINS)} عملة (MEXC)\n\n"
+        f"📊 المراقبة: {len(COINS)} عملة (BingX)\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 الأوامر:\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -92,9 +92,9 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔍 /scan ← فحص يدوي\n"
         "⏯ /toggle ← تشغيل/إيقاف\n"
         "🔄 /reset ← تصفير البيانات\n"
-        "🔑 /set_mexc ← ربط API\n\n"
+        "🔑 /set_bingx ← ربط API\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "™ ALPHA INVESTMENT v2.0 — MEXC\n"
+        "™ ALPHA INVESTMENT v2.0 — BingX\n"
         "© Powered by Abozaid"
     )
     await update.message.reply_text(msg, parse_mode=None)
@@ -103,7 +103,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
     st = load_state()
-    live_bal = mexc.get_balance('USDT') if mexc.api_key else 0
+    live_bal = bingx.get_balance('USDT') if bingx.api_key else 0
     bal = live_bal if live_bal > 0 else st.get('balance', 0)
     start_bal = st.get('start_balance') or bal
     total_pnl = bal - start_bal
@@ -154,7 +154,7 @@ async def position_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not pos:
         await update.message.reply_text("📭 لا توجد صفقة مفتوحة حالياً")
         return
-    price = mexc.get_price(pos['symbol'])
+    price = bingx.get_price(pos['symbol'])
     pnl = (price - pos['entry_price']) * pos['qty']
     pnl_pct = (price / pos['entry_price'] - 1) * 100
     trail = '🛡️✅ مفعل (SL=سعر الدخول)' if pos.get('trail_activated') else '⏳ بانتظار +1% للتفعيل'
@@ -192,7 +192,7 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     first_sym = True
 
     for sym in COINS:
-        raw_d = mexc.get_klines(sym, '1d', 3)
+        raw_d = bingx.get_klines(sym, '1d', 3)
         if isinstance(raw_d, dict) and 'error' in raw_d:
             api_errors += 1
             if first_sym:
@@ -206,13 +206,13 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 pump = (close_p - open_p) / open_p * 100
                 if pump >= 5:
                     entry = float(raw_d[-1][1])
-                    current = mexc.get_price(sym)
+                    current = bingx.get_price(sym)
                     perf = (current / entry - 1) * 100
                     signals_daily.append(f"💎 {sym} | {pump:+.1f}% (أمس) | الآن {perf:+.1f}% | دخول ${entry:.6f}")
             except Exception:
                 pass
 
-        raw_4 = mexc.get_klines(sym, '4h', 5)
+        raw_4 = bingx.get_klines(sym, '4h', 5)
         if raw_4 and isinstance(raw_4, list) and len(raw_4) >= 2:
             try:
                 last = raw_4[-2]
@@ -221,7 +221,7 @@ async def scan_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 pump_4 = (close_4 - open_4) / open_4 * 100
                 if pump_4 >= 5:
                     entry_4 = float(raw_4[-1][1])
-                    current_4 = mexc.get_price(sym)
+                    current_4 = bingx.get_price(sym)
                     perf_4 = (current_4 / entry_4 - 1) * 100
                     signals_4h.append(f"⚡ {sym} | 4h {pump_4:+.1f}% | الآن {perf_4:+.1f}% | دخول ${entry_4:.6f}")
             except Exception:
@@ -292,12 +292,12 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     if st.get('position') is not None:
         log.info("Scan skipped: position already open")
         return
-    if not mexc.api_key:
+    if not bingx.api_key:
         log.error("Scan failed: API key not configured")
         return
     log.info(f"🔍 Scanning for signals...")
-    scanner = Scanner(mexc, st)
-    live_bal = mexc.get_balance('USDT')
+    scanner = Scanner(bingx, st)
+    live_bal = bingx.get_balance('USDT')
     if live_bal < 1:
         log.warning(f"Balance too low: ${live_bal}")
         return
@@ -339,9 +339,9 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     st = load_state()
     if not st.get('is_active', True): return
     if not st.get('position'): return
-    if not mexc.api_key: return
+    if not bingx.api_key: return
 
-    scanner = Scanner(mexc, st)
+    scanner = Scanner(bingx, st)
     trade = st['position']
     action = scanner.check_tp_sl(trade)
 
@@ -357,7 +357,7 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     trade['status'] = 'CLOSED'
     st.setdefault('trades', []).append(trade)
     st['position'] = None
-    live_bal = mexc.get_balance('USDT')
+    live_bal = bingx.get_balance('USDT')
     st['balance'] = live_bal
     if live_bal > st.get('peak_balance', 0):
         st['peak_balance'] = live_bal
@@ -387,28 +387,28 @@ async def config_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
     await update.message.reply_text(
         "🔑 الإعدادات\n\n"
-        "لتحديث مفاتيح MEXC API:\n"
-        "`/set_mexc API_KEY SECRET_KEY`\n\n"
+        "لتحديث مفاتيح BingX API:\n"
+        "`/set_bingx API_KEY SECRET_KEY`\n\n"
         "لتحديث توكن التليجرام:\n"
         "`/set_telegram TOKEN`", parse_mode=None
     )
 
 
-async def set_mexc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
     args = ctx.args
     if len(args) < 2:
-        await update.message.reply_text("⚠️ الأمر: `/set_mexc API_KEY SECRET`", parse_mode=None)
+        await update.message.reply_text("⚠️ الأمر: `/set_bingx API_KEY SECRET`", parse_mode=None)
         return
-    mexc.api_key = args[0]
-    mexc.secret = args[1]
-    bal = mexc.get_balance('USDT')
+    bingx.api_key = args[0]
+    bingx.secret = args[1]
+    bal = bingx.get_balance('USDT')
     if isinstance(bal, float) and bal >= 0:
         st = load_state()
-        st['mexc_api_key'] = args[0]
-        st['mexc_secret_key'] = args[1]
+        st['bingx_api_key'] = args[0]
+        st['bingx_secret_key'] = args[1]
         save_state(st)
-        await update.message.reply_text(f"✅ تم ربط MEXC API! الرصيد: `${bal:.2f}`", parse_mode=None)
+        await update.message.reply_text(f"✅ تم ربط BingX API! الرصيد: `${bal:.2f}`", parse_mode=None)
     else:
         await update.message.reply_text("⚠️ المفاتيح تبدو غير صالحة، تأكد منها")
 
@@ -426,11 +426,11 @@ def main():
     app.add_handler(CommandHandler("reset", reset_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("config", config_cmd))
-    app.add_handler(CommandHandler("set_mexc", set_mexc))
+    app.add_handler(CommandHandler("set_bingx", set_bingx))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.job_queue.run_daily(scheduled_scan, time=datetime.strptime(f"{SCAN_HOUR:02d}:{SCAN_MINUTE:02d}", "%H:%M").time())
     app.job_queue.run_repeating(check_positions, interval=300, first=30)
-    log.info("🤖 MEXC Bot started! Press Ctrl+C to stop")
+    log.info("🤖 BingX Bot started! Press Ctrl+C to stop")
     app.run_polling()
 
 if __name__ == "__main__":

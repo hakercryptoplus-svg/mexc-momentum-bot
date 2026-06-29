@@ -165,10 +165,15 @@ class Scanner:
         }, None
 
     def _get_asset_balance(self, asset):
-        acct = self.m._get("/api/v3/account", signed=True)
-        if 'error' in acct:
-            return 0.0
-        for b in acct.get('balances', []):
-            if b['asset'] == asset:
-                return float(b.get('free', 0))
+        """Get balance of a specific asset using the exchange balance method"""
+        # For MEXC: uses _get with /api/v3/account
+        # For BingX: uses get_balance with coin param
+        # Try both approaches
+        try:
+            return self.m._get_asset_balance(asset)
+        except:
+            pass
+        # Fallback: get full balance
+        bal = self.m.get_balance(asset)
+        if bal > 0: return bal
         return 0.0

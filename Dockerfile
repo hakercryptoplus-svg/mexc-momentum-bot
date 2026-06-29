@@ -8,7 +8,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source
-COPY bot.py scanner.py mexc_api.py config.py state.py ./
+COPY bot.py scanner.py bingx_api.py config.py state.py ./
 
 # Create directory for state persistence
 RUN mkdir -p /data

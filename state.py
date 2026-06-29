@@ -14,8 +14,8 @@ DEFAULT_STATE = {
     "last_scan_date": None,
     "start_balance": None,
     "peak_balance": 0.0,
-    "mexc_api_key": None,
-    "mexc_secret_key": None,
+    "bingx_api_key": None,     # Set via /set_bingx in Telegram
+    "bingx_secret_key": None,  # Set via /set_bingx in Telegram
 }
 
 def load():
