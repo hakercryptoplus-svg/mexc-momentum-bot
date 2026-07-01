@@ -504,18 +504,39 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
     bingx.api_key = args[0]
-    bingx.api_key = args[0]
     bingx.secret = args[1]
     
-    # اختبار صارم — الرصيد لازم يكون > 0 عشان نقول نجاح
-    bal = bingx.get_balance('USDT')
-    
-    # تحقق إضافي: جرب نجيب سعر عملة عشان نضمن الـ API key تشتغل
+    # اختبار 1: هل Public API يشتغل (تأكيد اتصال)
     test_ticker = bingx.get_ticker('BTC/USDT')
     ticker_ok = isinstance(test_ticker, dict) and 'lastPrice' in test_ticker
     
-    # الشرط الصح: الرصيد لازم يكون float وأكبر من الصفر
-    if isinstance(bal, float) and bal > 0 and ticker_ok:
+    # اختبار 2: جيب الرصيد (يحتاج توقيع)
+    bal = bingx.get_balance('USDT')
+    
+    # اختبار 3: إذا فشل، جرب نجيب الخطأ الحقيقي من API
+    error_detail = ""
+    if not ticker_ok:
+        error_detail = "🌐 فشل الاتصال بـ BingX — تأكد من الإنترنت"
+    elif isinstance(bal, float) and bal == 0.0:
+        # جرب نشوف الـ raw response عشان نعرف السبب الحقيقي
+        import json as _json
+        raw = bingx._get("/openApi/spot/v1/account/balance", signed=True)
+        if isinstance(raw, dict) and 'error' in raw:
+            err_code = raw.get('error', '?')
+            err_msg = raw.get('msg', '')[:100]
+            if err_code == 100413:
+                error_detail = f"❌ خطأ {err_code}: المفاتيح غير صالحة أو منتهية الصلاحية"
+            elif err_code == 100419:
+                error_detail = f"⚠️ API صحيح لكن الرصيد $0.00 — الحساب فاضي"
+            elif err_code == 100435:
+                error_detail = f"⚠️ المفتاح للقراءة فقط — ارجع لـ BingX واختار صلاحية تداول"
+            else:
+                error_detail = f"⚠️ خطأ {err_code}: {err_msg}"
+        else:
+            error_detail = f"💸 تم الاتصال لكن الرصيد $0.00 — الحساب فاضي أو API ما عنده صلاحية"
+    
+    # نتائج الاختبار
+    if isinstance(bal, float) and bal > 0:
         st = load_state()
         st['bingx_api_key'] = args[0]
         st['bingx_secret_key'] = args[1]
@@ -526,28 +547,15 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🔑 الحالة: 🟢 متصل\n\n"
             f"📌 استخدم `/balance` لعرض تفاصيل المحفظة", parse_mode=None
         )
-    elif isinstance(bal, float) and bal == 0.0 and ticker_ok:
-        # الحالة دي: API صحيح بس الرصيد صفر أو API ما عنده صلاحية
-        st = load_state()
-        st['bingx_api_key'] = args[0]
-        st['bingx_secret_key'] = args[1]
-        save_state(st)
-        await update.message.reply_text(
-            f"⚠️ **تم ربط API** لكن الرصيد `$0.00`\n{'─'*25}\n"
-            f"🔑 الحالة: 🟢 API صحيح\n"
-            f"💰 الرصيد: `$0.00` — إما:\n"
-            f"• حسابك فاضي 💸\n"
-            f"• صلاحية API **قراءة فقط** 🔍 (محفظة التمويل مو الـ Spot)\n"
-            f"• جرب `/balance` للتأكيد", parse_mode=None
-        )
     else:
         await update.message.reply_text(
-            "❌ **المفاتيح غير صالحة**\n"
-            "تأكد من:\n"
-            "• نسخ **API Key** و **Secret** بشكل صحيح\n"
-            "• أن الـ API مسموح له بـ **Spot Trading**\n"
-            f"🔍 تلميح: خلي **IP Whitelist** فاضي عشان البوت يشتغل من أي مكان\n"
-            "• إعادة المحاولة مع الأمر `/set_bingx`", parse_mode=None
+            f"❌ **فشل ربط BingX API**\n{'─'*25}\n"
+            f"{error_detail}\n\n"
+            f"📌 **الحل:**\n"
+            f"1️⃣ امسح API Key القديم: https://bingx.com/en/account/api\n"
+            f"2️⃣ سو API **جديد** ✅\n"
+            f"3️⃣ ⚠️ انسخ **API Key** و **Secret Key** فوراً قبل قفل الصفحة\n"
+            f"4️⃣ أرسلهم لي وأنا أختبرهم", parse_mode=None
         )
 
 
