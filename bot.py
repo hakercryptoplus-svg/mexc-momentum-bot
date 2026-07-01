@@ -133,15 +133,32 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def balance_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
+    
     if not bingx.api_key:
-        await update.message.reply_text("⚠️ لم يتم ربط BingX API بعد. استخدم `/set_bingx`", parse_mode=None)
+        await update.message.reply_text("💳 **المحفظة**\n\n⚠️ لم يتم ربط BingX API بعد.\nاستخدم `/set_bingx` للمتابعة", parse_mode=None)
         return
+    
     st = load_state()
+    
+    # جرب نجيب الرصيد مباشر من API — أكثر من طريقة
     live_bal = bingx.get_balance('USDT')
-    bal = live_bal if live_bal > 0 else st.get('balance', 0)
-    start_bal = st.get('start_balance') or bal
+    if live_bal > 0:
+        bal = live_bal
+    else:
+        # طريقة ثانية: raw response
+        bal = st.get('balance', 0)
+        if bal == 0:
+            raw = bingx._get("/openApi/spot/v1/account/balance", signed=True)
+            if isinstance(raw, (list, dict)) and 'error' not in str(raw):
+                items = raw if isinstance(raw, list) else raw.get('balances', [])
+                for b in items:
+                    if b.get('asset') == 'USDT' or b.get('coin') == 'USDT':
+                        bal = float(b.get('free', b.get('balance', 0)))
+                        break
+
+    start_bal = st.get('start_balance') or bal or 1
     total_pnl = bal - start_bal
-    total_pnl_pct = (bal / start_bal - 1) * 100 if start_bal else 0
+    total_pnl_pct = (bal / start_bal - 1) * 100 if start_bal and start_bal > 0 else 0
     pos = st.get('position')
     pos_value = 0
     pos_sym = ''
@@ -159,7 +176,7 @@ async def balance_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"📈 **إجمالي الربح:** `{total_pnl:+.2f}` ({total_pnl_pct:+.1f}%)\n"
     )
     if pos:
-        pct_invested = (pos_value / bal) * 100 if bal else 0
+        pct_invested = (pos_value / bal) * 100 if bal and bal > 0 else 0
         msg += f"📊 **التوزيع:** `{pct_invested:.0f}%` مستثمر | `{100-pct_invested:.0f}%` متاح"
     await update.message.reply_text(msg, parse_mode=None)
 
@@ -487,9 +504,18 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
     bingx.api_key = args[0]
+    bingx.api_key = args[0]
     bingx.secret = args[1]
+    
+    # اختبار صارم — الرصيد لازم يكون > 0 عشان نقول نجاح
     bal = bingx.get_balance('USDT')
-    if isinstance(bal, float) and bal >= 0:
+    
+    # تحقق إضافي: جرب نجيب سعر عملة عشان نضمن الـ API key تشتغل
+    test_ticker = bingx.get_ticker('BTC/USDT')
+    ticker_ok = isinstance(test_ticker, dict) and 'lastPrice' in test_ticker
+    
+    # الشرط الصح: الرصيد لازم يكون float وأكبر من الصفر
+    if isinstance(bal, float) and bal > 0 and ticker_ok:
         st = load_state()
         st['bingx_api_key'] = args[0]
         st['bingx_secret_key'] = args[1]
@@ -500,12 +526,27 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🔑 الحالة: 🟢 متصل\n\n"
             f"📌 استخدم `/balance` لعرض تفاصيل المحفظة", parse_mode=None
         )
+    elif isinstance(bal, float) and bal == 0.0 and ticker_ok:
+        # الحالة دي: API صحيح بس الرصيد صفر أو API ما عنده صلاحية
+        st = load_state()
+        st['bingx_api_key'] = args[0]
+        st['bingx_secret_key'] = args[1]
+        save_state(st)
+        await update.message.reply_text(
+            f"⚠️ **تم ربط API** لكن الرصيد `$0.00`\n{'─'*25}\n"
+            f"🔑 الحالة: 🟢 API صحيح\n"
+            f"💰 الرصيد: `$0.00` — إما:\n"
+            f"• حسابك فاضي 💸\n"
+            f"• صلاحية API **قراءة فقط** 🔍 (محفظة التمويل مو الـ Spot)\n"
+            f"• جرب `/balance` للتأكيد", parse_mode=None
+        )
     else:
         await update.message.reply_text(
-            "❌ **المفاتيح تبدو غير صالحة**\n"
+            "❌ **المفاتيح غير صالحة**\n"
             "تأكد من:\n"
             "• نسخ **API Key** و **Secret** بشكل صحيح\n"
             "• أن الـ API مسموح له بـ **Spot Trading**\n"
+            f"🔍 تلميح: خلي **IP Whitelist** فاضي عشان البوت يشتغل من أي مكان\n"
             "• إعادة المحاولة مع الأمر `/set_bingx`", parse_mode=None
         )
 
