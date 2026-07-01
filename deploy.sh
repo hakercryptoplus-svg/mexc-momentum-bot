@@ -19,7 +19,7 @@ fi
 TOKEN="$1"
 USER="abozaid005"
 REPO="mexc-momentum-bot"
-DIR="/root/.openclaw/workspace/mexc-bot-deploy"
+DIR="/root/.openclaw/workspace/bot-deploy"
 
 echo "🚀 إنشاء المستودع $REPO على GitHub..."
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BingX Momentum Bot — Telegram Interface
-Automated trading bot for BingX (42 coins) with Telegram control.
+ALPHA INVESTMENT — BingX Momentum Bot
+بوت تداول آلي — 42 عملة على BingX مع تحكم عبر تيليجرام
 Trailing Stop +1% → Breakeven (حماية رأس المال)
 
 Deploy on Render, Railway, or any Python host.
@@ -85,6 +85,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 الأوامر:\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💰 /balance ← رصيد المحفظة\n"
         "📈 /status ← الرصيد والحالة\n"
         "💼 /position ← الصفقة الحالية\n"
         "📋 /trades ← آخر الصفقات\n"
@@ -92,7 +93,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔍 /scan ← فحص يدوي\n"
         "⏯ /toggle ← تشغيل/إيقاف\n"
         "🔄 /reset ← تصفير البيانات\n"
-        "🔑 /set_bingx ← ربط API\n\n"
+        "🔑 /set_bingx ← ربط API\n"
+        "📖 /help ← المساعدة\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "™ ALPHA INVESTMENT v2.0 — BingX\n"
         "© Powered by Abozaid"
@@ -126,6 +128,39 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg += f"{pos['symbol']} | دخول: ${pos['entry_price']:.6f} | TP: ${pos['tp']:.6f} | SL: ${pos['sl']:.6f} | Trailing: {trail}"
     else:
         msg += "_لا توجد_"
+    await update.message.reply_text(msg, parse_mode=None)
+
+
+async def balance_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_CHAT_ID: return
+    if not bingx.api_key:
+        await update.message.reply_text("⚠️ لم يتم ربط BingX API بعد. استخدم `/set_bingx`", parse_mode=None)
+        return
+    st = load_state()
+    live_bal = bingx.get_balance('USDT')
+    bal = live_bal if live_bal > 0 else st.get('balance', 0)
+    start_bal = st.get('start_balance') or bal
+    total_pnl = bal - start_bal
+    total_pnl_pct = (bal / start_bal - 1) * 100 if start_bal else 0
+    pos = st.get('position')
+    pos_value = 0
+    pos_sym = ''
+    if pos:
+        price = bingx.get_price(pos['symbol'])
+        pos_value = price * pos['qty']
+        pos_sym = pos['symbol']
+    available = bal - pos_value
+    
+    msg = (
+        f"💳 **المحفظة**\n{'─'*30}\n\n"
+        f"💰 **USDT المتاح:** `${available:.2f}`\n"
+        f"📦 **المستثمر:** `${pos_value:.2f}` {f'({pos_sym})' if pos_sym else ''}\n"
+        f"💵 **الإجمالي:** `${bal:.2f}`\n"
+        f"📈 **إجمالي الربح:** `{total_pnl:+.2f}` ({total_pnl_pct:+.1f}%)\n"
+    )
+    if pos:
+        pct_invested = (pos_value / bal) * 100 if bal else 0
+        msg += f"📊 **التوزيع:** `{pct_invested:.0f}%` مستثمر | `{100-pct_invested:.0f}%` متاح"
     await update.message.reply_text(msg, parse_mode=None)
 
 
@@ -258,6 +293,28 @@ async def button_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ تم الإلغاء")
 
 
+async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_CHAT_ID: return
+    msg = (
+        "📖 **المساعدة — ALPHA INVESTMENT v2.0**\n"
+        "═══════════════════════════════════\n\n"
+        "💰 `/balance` ← رصيد المحفظة\n"
+        "📈 `/status` ← الحالة العامة\n"
+        "💼 `/position` ← الصفقة الحالية\n"
+        "📋 `/trades` ← آخر الصفقات\n"
+        "📊 `/stats` ← الإحصائيات\n"
+        "🔍 `/scan` ← فحص الإشارات يدوياً\n"
+        "⏯ `/toggle` ← تشغيل/إيقاف\n"
+        "🔄 `/reset` ← تصفير البيانات\n"
+        "🔐 `/set_bingx` ← ربط BingX API\n"
+        "📖 `/help` ← هذه القائمة\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🤖 صنع بواسطة **Abozaid**™\n"
+        "© ALPHA INVESTMENT"
+    )
+    await update.message.reply_text(msg, parse_mode=None)
+
+
 async def stats_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
     st = load_state()
@@ -331,15 +388,18 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     if live_bal > st.get('peak_balance', 0):
         st['peak_balance'] = live_bal
     save_state(st)
+    bal_after = bingx.get_balance('USDT')
+    pct_used = (trade['usdt_invested'] / bal_after) * 100 if bal_after else 0
     msg = (
-        f"🚀 صفقة جديدة!\n{'─'*25}\n"
-        f"🔹 العملة: `{trade['symbol']}`\n"
-        f"📊 Pump: `{signal['pump']:+.1f}%`\n"
-        f"📌 الدخول: `${trade['entry_price']:.6f}`\n"
-        f"💰 المستثمر: `${trade['usdt_invested']:.2f}`\n"
-        f"🎯 TP: `${trade['tp']:.6f}`\n"
-        f"🛑 SL أولي: `${trade['entry_price']*0.99:.6f}`\n"
-        f"🔄 Trailing: +1% → Breakeven 🛡️"
+        f"🚀 **صفقة جديدة!**\n{'─'*25}\n"
+        f"🔹 **العملة:** `{trade['symbol']}`\n"
+        f"📊 **Pump:** `{signal['pump']:+.1f}%`\n"
+        f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
+        f"💰 **المستثمر:** `${trade['usdt_invested']:.2f}` ({pct_used:.0f}% من الرصيد)\n"
+        f"🎯 **TP:** `${trade['tp']:.6f}` (+2%)\n"
+        f"🛑 **SL أولي:** `${trade['entry_price']*0.99:.6f}` (-1%)\n"
+        f"🔄 **Trailing:** +1% → Breakeven 🛡️\n\n"
+        f"⏳ **مراقبة:** كل 5 دقائق"
     )
     await _notify(ctx, msg)
     log.info(f"Trade executed: {trade['symbol']} @ ${trade['entry_price']:.6f}")
@@ -374,13 +434,15 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
 
     icon = '🔄' if action == 'BE' else ('✅' if close_data['pnl'] > 0 else '❌')
+    action_label = {'TP': '🎯 جني أرباح', 'SL': '🛑 وقف خسارة', 'BE': '🔄 Breakeven'}.get(action, action)
     msg = (
-        f"{icon} صفقة مقفلة\n{'─'*25}\n"
-        f"🔹 {trade['symbol']} → {action}\n"
-        f"📌 الدخول: `${trade['entry_price']:.6f}`\n"
-        f"🔄 الخروج: `${close_data['exit_price']:.6f}`\n"
-        f"📊 PnL: `{close_data['pnl']:+.2f}` ({close_data['pnl_pct']:+.2f}%)\n"
-        f"💰 الرصيد: `${live_bal:.2f}`"
+        f"{icon} **صفقة مقفلة**\n{'─'*25}\n"
+        f"🔹 {trade['symbol']} → {action_label}\n"
+        f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
+        f"🔄 **الخروج:** `${close_data['exit_price']:.6f}`\n"
+        f"📊 **النتيجة:** `{close_data['pnl']:+.2f}` ({close_data['pnl_pct']:+.2f}%)\n"
+        f"💵 **الرصيد:** `${live_bal:.2f}`\n"
+        f"📅 **الخروج:** `{close_data.get('exit_time', close_data.get('exit_time',''))[:16]}`"
     )
     await _notify(ctx, msg)
     log.info(f"Position closed: {trade['symbol']} pnl={close_data['pnl']:+.2f}")
@@ -408,7 +470,21 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_CHAT_ID: return
     args = ctx.args
     if len(args) < 2:
-        await update.message.reply_text("⚠️ الأمر: `/set_bingx API_KEY SECRET`", parse_mode=None)
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔗 فتح BingX API", url="https://bingx.com/en-us/user/security/api"),
+        ]])
+        await update.message.reply_text(
+            "🔐 **ربط BingX API**\n"
+            "═══════════════════\n\n"
+            "**📌 الخطوات:**\n"
+            "1️⃣ افتح [BingX API](https://bingx.com/en-us/user/security/api)\n"
+            "2️⃣ أنشئ API Key جديد **للـ Spot فقط**\n"
+            "3️⃣ انسخ المفتاح والمفتاح السري\n"
+            "4️⃣ أرسل: `/set_bingx API_KEY SECRET_KEY`\n\n"
+            "⚠️ مثال:\n"
+            "`/set_bingx abcdef123456 xyz789secret`",
+            parse_mode=None, reply_markup=kb
+        )
         return
     bingx.api_key = args[0]
     bingx.secret = args[1]
@@ -418,9 +494,20 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st['bingx_api_key'] = args[0]
         st['bingx_secret_key'] = args[1]
         save_state(st)
-        await update.message.reply_text(f"✅ تم ربط BingX API! الرصيد: `${bal:.2f}`", parse_mode=None)
+        await update.message.reply_text(
+            f"✅ **تم ربط BingX API بنجاح!**\n{'─'*25}\n"
+            f"💰 الرصيد: `${bal:.2f}`\n"
+            f"🔑 الحالة: 🟢 متصل\n\n"
+            f"📌 استخدم `/balance` لعرض تفاصيل المحفظة", parse_mode=None
+        )
     else:
-        await update.message.reply_text("⚠️ المفاتيح تبدو غير صالحة، تأكد منها")
+        await update.message.reply_text(
+            "❌ **المفاتيح تبدو غير صالحة**\n"
+            "تأكد من:\n"
+            "• نسخ **API Key** و **Secret** بشكل صحيح\n"
+            "• أن الـ API مسموح له بـ **Spot Trading**\n"
+            "• إعادة المحاولة مع الأمر `/set_bingx`", parse_mode=None
+        )
 
 
 # ========== MAIN ==========
@@ -435,6 +522,8 @@ def main():
     app.add_handler(CommandHandler("scan", scan_cmd))
     app.add_handler(CommandHandler("reset", reset_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("balance", balance_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("config", config_cmd))
     app.add_handler(CommandHandler("set_bingx", set_bingx))
     app.add_handler(CallbackQueryHandler(button_callback))

@@ -17,7 +17,7 @@ FEE = float(os.getenv('FEE', '0.001'))                   # BingX spot fee (0.1%)
 
 # === Coin Watchlist (from env, comma-separated, or default 42 BingX coins) ===
 DEFAULT_COINS = [
-    # — العملات الأساسية (من MEXC الأصلية، شغالة على BingX) —
+    # — العملات الأساسية (42 عملة — كلها شغالة على BingX) —
     'ADA/USDT', 'ASTER/USDT', 'BEAT/USDT', 'BEL/USDT', 'BNB/USDT',
     'CHECK/USDT', 'CLO/USDT', 'DN/USDT', 'DOGE/USDT', 'DOT/USDT',
     'EIGEN/USDT', 'ETH/USDT', 'ETHFI/USDT', 'FIL/USDT', 'HYPE/USDT',

@@ -166,9 +166,7 @@ class Scanner:
 
     def _get_asset_balance(self, asset):
         """Get balance of a specific asset using the exchange balance method"""
-        # For MEXC: uses _get with /api/v3/account
-        # For BingX: uses get_balance with coin param
-        # Try both approaches
+        # Get balance for the asset — try exchange-specific method first
         try:
             return self.m._get_asset_balance(asset)
         except:
