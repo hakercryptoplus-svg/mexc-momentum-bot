@@ -23,10 +23,8 @@ class BingX:
             time.sleep(self.delay - elapsed)
 
     def _sign(self, params):
-        """توقيع HMAC-SHA256 مع فرز الحروف"""
-        # نستخدم sorted + urlencode مثل BingX بالضبط
-        items = sorted((k, str(v)) for k, v in params.items() if v is not None)
-        query = '&'.join(f'{k}={v}' for k, v in items)
+        """توقيع HMAC-SHA256 — مثل BingX SDK بالضبط"""
+        query = urlencode(sorted(params.items()))
         return hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
     def _fmt(self, symbol):
