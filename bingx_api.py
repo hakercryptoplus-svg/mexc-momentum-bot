@@ -38,7 +38,6 @@ class BingX:
         if signed:
             params = params or {}
             params['timestamp'] = int(time.time() * 1000)
-            params['recvWindow'] = 10000  # 10 ثواني - يحل فرق التوقيت
             params['signature'] = self._sign(params)
         try:
             r = requests.get(url, params=params, headers=headers, timeout=15)
