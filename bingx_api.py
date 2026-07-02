@@ -23,7 +23,10 @@ class BingX:
             time.sleep(self.delay - elapsed)
 
     def _sign(self, params):
-        query = urlencode(sorted(params.items()))
+        """توقيع HMAC-SHA256 مع فرز الحروف"""
+        # نستخدم sorted + urlencode مثل BingX بالضبط
+        items = sorted((k, str(v)) for k, v in params.items() if v is not None)
+        query = '&'.join(f'{k}={v}' for k, v in items)
         return hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
     def _fmt(self, symbol):
@@ -37,6 +40,7 @@ class BingX:
         if signed:
             params = params or {}
             params['timestamp'] = int(time.time() * 1000)
+            params['recvWindow'] = 10000  # 10 ثواني - يحل فرق التوقيت
             params['signature'] = self._sign(params)
         try:
             r = requests.get(url, params=params, headers=headers, timeout=15)
@@ -51,12 +55,15 @@ class BingX:
         self._rate_limit()
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
+        params['recvWindow'] = 10000  # 10 ثواني - يحل فرق التوقيت
         params['signature'] = self._sign(params)
         headers = {'X-BX-APIKEY': self.api_key}
         try:
             r = requests.post(f"{BINGX_BASE}{path}", params=params, headers=headers, timeout=15)
             data = r.json()
-            return data if data.get('code') == 0 else {'error': data.get('code', r.status_code), 'msg': str(data)[:200]}
+            if data.get('code') == 0:
+                return data.get('data') or data
+            return {'error': data.get('code', r.status_code), 'msg': str(data)[:300]}
         except Exception as e:
             return {'error': -1, 'msg': str(e)}
 
@@ -64,12 +71,15 @@ class BingX:
         self._rate_limit()
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
+        params['recvWindow'] = 10000
         params['signature'] = self._sign(params)
         headers = {'X-BX-APIKEY': self.api_key}
         try:
             r = requests.delete(f"{BINGX_BASE}{path}", params=params, headers=headers, timeout=15)
             data = r.json()
-            return data if data.get('code') == 0 else {'error': data.get('code', r.status_code), 'msg': str(data)[:200]}
+            if data.get('code') == 0:
+                return data.get('data') or data
+            return {'error': data.get('code', r.status_code), 'msg': str(data)[:200]}
         except Exception as e:
             return {'error': -1, 'msg': str(e)}
 
