@@ -22,10 +22,13 @@ class BingX:
         if elapsed < self.delay:
             time.sleep(self.delay - elapsed)
 
-    def _sign(self, params):
-        """توقيع HMAC-SHA256 — مثل BingX SDK بالضبط"""
-        query = urlencode(sorted(params.items()))
-        return hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    def _sign(self, query_string):
+        """توقيع HMAC-SHA256 على query string جاهز (مرتّب مسبقاً)"""
+        return hmac.new(
+            self.secret.encode("utf-8"),
+            query_string.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
 
     def _fmt(self, symbol):
         """Convert X/USDT -> X-USDT for BingX"""
@@ -33,12 +36,19 @@ class BingX:
 
     def _get(self, path, params=None, signed=False):
         self._rate_limit()
-        url = f"{BINGX_BASE}{path}"
-        headers = {'X-BX-APIKEY': self.api_key} if signed and self.api_key else {}
-        if signed:
+        self._last_call = time.time()
+        headers = {}
+        if signed and self.api_key:
+            headers['X-BX-APIKEY'] = self.api_key
             params = params or {}
             params['timestamp'] = int(time.time() * 1000)
-            params['signature'] = self._sign(params)
+            # بناء query string مرتّب أبجدياً → يُوقَّع ويُرسَل بنفس الترتيب
+            query = urlencode(sorted(params.items()))
+            sig = self._sign(query)
+            url = f"{BINGX_BASE}{path}?{query}&signature={sig}"
+            params = None  # موجودة في URL مباشرة
+        else:
+            url = f"{BINGX_BASE}{path}"
         try:
             r = requests.get(url, params=params, headers=headers, timeout=15)
             data = r.json()
@@ -50,13 +60,17 @@ class BingX:
 
     def _post(self, path, params=None):
         self._rate_limit()
+        self._last_call = time.time()
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
-        params['recvWindow'] = 10000  # 10 ثواني - يحل فرق التوقيت
-        params['signature'] = self._sign(params)
+        params['recvWindow'] = 10000  # 10 ثواني — يحل فرق التوقيت
+        # بناء query string مرتّب أبجدياً → يُوقَّع ويُرسَل بنفس الترتيب
+        query = urlencode(sorted(params.items()))
+        sig = self._sign(query)
+        url = f"{BINGX_BASE}{path}?{query}&signature={sig}"
         headers = {'X-BX-APIKEY': self.api_key}
         try:
-            r = requests.post(f"{BINGX_BASE}{path}", params=params, headers=headers, timeout=15)
+            r = requests.post(url, headers=headers, timeout=15)
             data = r.json()
             if data.get('code') == 0:
                 return data.get('data') or data
@@ -66,13 +80,16 @@ class BingX:
 
     def _delete(self, path, params=None):
         self._rate_limit()
+        self._last_call = time.time()
         params = params or {}
         params['timestamp'] = int(time.time() * 1000)
         params['recvWindow'] = 10000
-        params['signature'] = self._sign(params)
+        query = urlencode(sorted(params.items()))
+        sig = self._sign(query)
+        url = f"{BINGX_BASE}{path}?{query}&signature={sig}"
         headers = {'X-BX-APIKEY': self.api_key}
         try:
-            r = requests.delete(f"{BINGX_BASE}{path}", params=params, headers=headers, timeout=15)
+            r = requests.delete(url, headers=headers, timeout=15)
             data = r.json()
             if data.get('code') == 0:
                 return data.get('data') or data
@@ -163,7 +180,6 @@ class BingX:
     def get_symbol_filters(self, symbol):
         """Get LOT_SIZE filter (stepSize) for quantity rounding"""
         s = self._fmt(symbol)
-        # Use exchangeInfo from common symbols
         r = requests.get(f"{BINGX_BASE}/openApi/spot/v1/common/symbols", timeout=10)
         if r.status_code != 200: return None
         data = r.json()
