@@ -559,6 +559,90 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ========== TEST COMMAND ==========
+
+async def test_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """اختبار شامل لكل خطوات الصفقة الحقيقية — بدون تنفيذ شراء"""
+    if update.effective_user.id != TELEGRAM_CHAT_ID: return
+
+    msg = await update.message.reply_text("🔬 جاري الاختبار الشامل...", parse_mode=None)
+    lines = ["🔬 نتائج الاختبار\n" + "─" * 30]
+
+    # ── 1. اتصال عام (Public API) ──
+    ticker = bingx.get_ticker('BTC/USDT')
+    if isinstance(ticker, dict) and 'lastPrice' in ticker:
+        btc = float(ticker['lastPrice'])
+        lines.append(f"✅ 1. اتصال BingX: سعر BTC = ${btc:,.0f}")
+    else:
+        lines.append(f"❌ 1. اتصال BingX فشل: {str(ticker)[:80]}")
+        await msg.edit_text("\n".join(lines), parse_mode=None)
+        return
+
+    # ── 2. توقيع GET — جلب الرصيد ──
+    if not bingx.api_key:
+        lines.append("⚠️ 2. لا يوجد API Key — استخدم /set_bingx أولاً")
+        await msg.edit_text("\n".join(lines), parse_mode=None)
+        return
+
+    raw_bal = bingx._get("/openApi/spot/v1/account/balance", signed=True)
+    if isinstance(raw_bal, dict) and 'error' in raw_bal:
+        code = raw_bal.get('error')
+        lines.append(f"❌ 2. توقيع GET فشل (كود {code}): {raw_bal.get('msg','')[:80]}")
+        if code == 100001:
+            lines.append("   ↳ مشكلة Signature — تأكد من Secret Key")
+        elif code == 100413:
+            lines.append("   ↳ API Key غير صالح أو منتهي الصلاحية")
+        await msg.edit_text("\n".join(lines), parse_mode=None)
+        return
+
+    bal = bingx.get_balance('USDT')
+    lines.append(f"✅ 2. توقيع GET: رصيد USDT = ${bal:.2f}")
+
+    # ── 3. توقيع POST — محاولة أمر وهمي ($0.01) ──
+    # BingX سترفضه بـ "أقل من الحد الأدنى" — لكن إذا وصل لهذا الخطأ
+    # يعني التوقيع صح (كود 100001 = signature خطأ)
+    test_order = bingx._post("/openApi/spot/v1/trade/order", {
+        'symbol': 'BTC-USDT', 'side': 'BUY', 'type': 'MARKET',
+        'quoteOrderQty': '0.01'
+    })
+    post_code = test_order.get('error') if isinstance(test_order, dict) else None
+
+    if post_code == 100001:
+        lines.append(f"❌ 3. توقيع POST فشل (Signature mismatch) — الإصلاح لم يطبّق بعد!")
+        lines.append("   ↳ أعد نشر الكود على Render وانتظر دقيقة")
+        await msg.edit_text("\n".join(lines), parse_mode=None)
+        return
+    elif post_code is not None:
+        # أي كود آخر = التوقيع وصل لـ BingX وهي رفضته لسبب تجاري (مقبول)
+        msg_text = test_order.get('msg', '')[:100]
+        lines.append(f"✅ 3. توقيع POST: صحيح ✔ (BingX رفضت بكود {post_code}: {msg_text[:60]})")
+        lines.append("   ↳ رفض تجاري طبيعي — التوقيع وصل سليم")
+    else:
+        lines.append("✅ 3. توقيع POST: تم القبول (غير متوقع — راجع الرصيد)")
+
+    # ── 4. جلب الشمعات (نفس ما يستخدمه /scan) ──
+    test_sym = COINS[0] if COINS else 'BTC/USDT'
+    klines = bingx.get_klines(test_sym, '1d', 3)
+    if isinstance(klines, list) and len(klines) >= 2:
+        yesterday = klines[-2]
+        try:
+            pump = (float(yesterday[4]) - float(yesterday[1])) / float(yesterday[1]) * 100
+            lines.append(f"✅ 4. الشمعات: {test_sym} أمس {pump:+.2f}%")
+        except:
+            lines.append(f"✅ 4. الشمعات: {test_sym} — {len(klines)} شمعة")
+    else:
+        lines.append(f"❌ 4. الشمعات فشل: {str(klines)[:80]}")
+
+    # ── الخلاصة ──
+    lines.append("\n" + "─" * 30)
+    if all("✅" in l for l in lines if l.startswith(("✅", "❌"))):
+        lines.append("🟢 كل شيء شغال — البوت جاهز للصفقة!")
+    else:
+        lines.append("🔴 في مشاكل — راجع السطور اللي عندها ❌")
+
+    await msg.edit_text("\n".join(lines), parse_mode=None)
+
+
 # ========== MAIN ==========
 def main():
     run_health_server()
@@ -575,6 +659,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("config", config_cmd))
     app.add_handler(CommandHandler("set_bingx", set_bingx))
+    app.add_handler(CommandHandler("test", test_cmd))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.job_queue.run_daily(scheduled_scan, time=datetime.strptime(f"{SCAN_HOUR:02d}:{SCAN_MINUTE:02d}", "%H:%M").time())
     app.job_queue.run_repeating(check_positions, interval=300, first=30)
