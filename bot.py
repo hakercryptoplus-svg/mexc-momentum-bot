@@ -405,13 +405,14 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     if live_bal > st.get('peak_balance', 0):
         st['peak_balance'] = live_bal
     save_state(st)
-    bal_after = bingx.get_balance('USDT')
-    pct_used = (trade['usdt_invested'] / bal_after) * 100 if bal_after else 0
+    # نسبة الاستثمار من الرصيد قبل الشراء (live_bal) — لا من الرصيد بعده (يكون قريب من صفر)
+    pct_used = min((trade['usdt_invested'] / live_bal) * 100, 100) if live_bal else 100
     msg = (
         f"🚀 **صفقة جديدة!**\n{'─'*25}\n"
         f"🔹 **العملة:** `{trade['symbol']}`\n"
         f"📊 **Pump:** `{signal['pump']:+.1f}%`\n"
         f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
+        f"📦 **الكمية:** `{trade['qty']:.6f}` {trade['symbol'].split('/')[0]}\n"
         f"💰 **المستثمر:** `${trade['usdt_invested']:.2f}` ({pct_used:.0f}% من الرصيد)\n"
         f"🎯 **TP:** `${trade['tp']:.6f}` (+2%)\n"
         f"🛑 **SL أولي:** `${trade['entry_price']*0.99:.6f}` (-1%)\n"

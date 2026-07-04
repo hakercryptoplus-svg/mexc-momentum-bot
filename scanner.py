@@ -62,9 +62,29 @@ class Scanner:
         if 'error' in result:
             return None, f"فشل الشراء: {result.get('msg', result)}"
 
+        # ── استخراج السعر والكمية من استجابة BingX ──
+        # BingX لا يرجع fills مثل Binance — يستخدم executedQty و cummulativeQuoteQty
         fills = result.get('fills', [])
-        qty = sum(float(f['qty']) for f in fills)
-        avg_price = sum(float(f['price']) for f in fills) / max(len(fills), 1)
+        if fills:
+            # حساب المتوسط الموزون من fills (إذا وُجدت)
+            qty = sum(float(f['qty']) for f in fills)
+            avg_price = (
+                sum(float(f['price']) * float(f['qty']) for f in fills) / qty
+                if qty > 0 else 0
+            )
+        else:
+            # استجابة BingX الاعتيادية
+            qty = float(result.get('executedQty') or result.get('origQty') or 0)
+            quote_spent = float(result.get('cummulativeQuoteQty') or 0)
+            if qty > 0 and quote_spent > 0:
+                avg_price = quote_spent / qty
+            else:
+                # آخر حل: السعر الحالي من السوق
+                avg_price = self.m.get_price(sym)
+
+        # حماية: إذا السعر لا يزال صفر، أرجع خطأ
+        if avg_price <= 0:
+            return None, f"تعذّر تحديد سعر الدخول بعد الشراء (executedQty={qty})"
 
         trade = {
             'symbol': sym,
