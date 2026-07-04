@@ -104,10 +104,13 @@ class Scanner:
         return trade, None
 
     def check_tp_sl(self, trade):
-        """Check if TP or SL is hit. Returns 'TP', 'SL', 'BE', or 'HOLD'
-        
+        """Check if TP or SL is hit. Returns 'TP', 'SL', 'BE', 'TRAIL', or 'HOLD'
+
+        يستخدم السعر الحالي فقط (lastPrice) — وليس highPrice/lowPrice من الـ 24h ticker
+        لأن الـ 24h high/low يتضمن حركة أمس (قبل دخولنا) وسيُفعّل TP/SL بشكل خاطئ.
+
         TRAILING LOGIC:
-        - إذا السعر لمس +1% من سعر الدخول ← الـ SL يتحرك لسعر الدخول (Breakeven)
+        - إذا السعر لمس +1% من سعر الدخول ← SL يتحرك لسعر الدخول (Breakeven)
         - بعدها ننتظر TP أو Breakeven — لا خسارة بعد التفعيل
         """
         sym = trade['symbol']
@@ -116,10 +119,11 @@ class Scanner:
             return 'HOLD'
 
         try:
-            high = float(ticker.get('highPrice', 0))
-            low = float(ticker.get('lowPrice', 0))
             current = float(ticker.get('lastPrice', 0))
         except:
+            return 'HOLD'
+
+        if current <= 0:
             return 'HOLD'
 
         tp = trade['tp']
@@ -129,25 +133,18 @@ class Scanner:
         trail_activated = trade.get('trail_activated', False)
 
         # === TRAILING: هل السعر لمس +1%؟ ===
-        if not trail_activated:
-            if high >= trail_trigger or current >= trail_trigger:
-                trade['trail_activated'] = True
-                trade['sl'] = sl_trailed  # حرك الـ SL لسعر الدخول
-                trade['trail_time'] = datetime.now(timezone.utc).isoformat()
-                trail_activated = True
+        if not trail_activated and current >= trail_trigger:
+            trade['trail_activated'] = True
+            trade['sl'] = sl_trailed        # حرك SL لسعر الدخول (Breakeven)
+            trade['trail_time'] = datetime.now(timezone.utc).isoformat()
+            trail_activated = True
+            return 'TRAIL'                  # أعلم bot.py أن يحفظ الحالة ويرسل تنبيه
 
         sl = trade['sl']
 
-        if low <= sl:
-            if trail_activated:
-                return 'BE'
-            return 'SL'
-        if high >= tp:
-            return 'TP'
         if current <= sl:
-            if trail_activated:
-                return 'BE'
-            return 'SL'
+            return 'BE' if trail_activated else 'SL'
+
         if current >= tp:
             return 'TP'
 
@@ -170,11 +167,30 @@ class Scanner:
         if 'error' in result:
             return None, f"فشل البيع: {result.get('msg', result)}"
 
+        # ── استخراج سعر البيع من استجابة BingX (نفس منطق الشراء) ──
         fills = result.get('fills', [])
-        avg_price = sum(float(f['price']) for f in fills) / max(len(fills), 1)
+        if fills:
+            total_qty = sum(float(f['qty']) for f in fills)
+            avg_price = (
+                sum(float(f['price']) * float(f['qty']) for f in fills) / total_qty
+                if total_qty > 0 else 0
+            )
+        else:
+            sold_qty  = float(result.get('executedQty') or 0)
+            quote_got = float(result.get('cummulativeQuoteQty') or 0)
+            if sold_qty > 0 and quote_got > 0:
+                avg_price = quote_got / sold_qty
+            else:
+                avg_price = self.m.get_price(sym)   # آخر حل
 
-        pnl = (avg_price - trade['entry_price']) * trade['qty'] - (trade['usdt_invested'] + avg_price * trade['qty']) * FEE
-        pnl_pct = (avg_price / trade['entry_price'] - 1) * 100
+        if avg_price <= 0:
+            return None, f"تعذّر تحديد سعر الخروج (executedQty={result.get('executedQty')})"
+
+        # PnL صافي بعد عمولة الشراء والبيع
+        buy_fee  = trade['usdt_invested'] * FEE
+        sell_rev = avg_price * adjusted * (1 - FEE)
+        pnl      = sell_rev - trade['usdt_invested'] - buy_fee
+        pnl_pct  = (avg_price / trade['entry_price'] - 1) * 100
 
         return {
             'exit_price': avg_price,

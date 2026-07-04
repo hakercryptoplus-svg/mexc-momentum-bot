@@ -431,14 +431,33 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
 
     scanner = Scanner(bingx, st)
     trade = st['position']
-    action = scanner.check_tp_sl(trade)
+    action = scanner.check_tp_sl(trade)  # قد يعدّل trade مباشرة (trail_activated, sl, trail_time)
+
+    # ── Trailing تفعّل للتو ──
+    if action == 'TRAIL':
+        st['position'] = trade          # احفظ التغييرات (trail_activated=True, sl جديد)
+        save_state(st)
+        log.info(f"Trailing activated: {trade['symbol']} SL → ${trade['sl']:.6f}")
+        await _notify(ctx,
+            f"🛡️ **Trailing Stop مفعّل!**\n{'─'*25}\n"
+            f"🔹 **العملة:** `{trade['symbol']}`\n"
+            f"📌 **سعر الدخول:** `${trade['entry_price']:.6f}`\n"
+            f"✅ **السعر لمس +1%** — وقف الخسارة تحرّك إلى سعر الدخول\n"
+            f"🛑 **SL الجديد:** `${trade['sl']:.6f}` (Breakeven)\n"
+            f"🎯 **TP:** `${trade['tp']:.6f}` (+2%)\n\n"
+            f"🔒 رأس المال محمي — الآن إما ربح أو تعادل"
+        )
+        return
 
     if action == 'HOLD': return
+
+    # ── إغلاق الصفقة (TP / SL / BE) ──
     log.info(f"Closing position: {trade['symbol']} -> {action}")
 
     close_data, error = scanner.close_trade(trade, action)
     if error:
         log.error(f"Close failed: {error}")
+        await _notify(ctx, f"⚠️ فشل إغلاق الصفقة\n{trade['symbol']}: {error}")
         return
 
     trade.update(close_data)
@@ -452,15 +471,15 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
 
     icon = '🔄' if action == 'BE' else ('✅' if close_data['pnl'] > 0 else '❌')
-    action_label = {'TP': '🎯 جني أرباح', 'SL': '🛑 وقف خسارة', 'BE': '🔄 Breakeven'}.get(action, action)
+    action_label = {'TP': '🎯 جني أرباح', 'SL': '🛑 وقف خسارة', 'BE': '🔄 تعادل (Breakeven)'}.get(action, action)
     msg = (
-        f"{icon} **صفقة مقفلة**\n{'─'*25}\n"
-        f"🔹 {trade['symbol']} → {action_label}\n"
+        f"{icon} **صفقة مقفلة — {action_label}**\n{'─'*25}\n"
+        f"🔹 **العملة:** `{trade['symbol']}`\n"
         f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
         f"🔄 **الخروج:** `${close_data['exit_price']:.6f}`\n"
-        f"📊 **النتيجة:** `{close_data['pnl']:+.2f}` ({close_data['pnl_pct']:+.2f}%)\n"
-        f"💵 **الرصيد:** `${live_bal:.2f}`\n"
-        f"📅 **الخروج:** `{close_data.get('exit_time', close_data.get('exit_time',''))[:16]}`"
+        f"📊 **النتيجة:** `{close_data['pnl']:+.2f} USDT` ({close_data['pnl_pct']:+.2f}%)\n"
+        f"💵 **الرصيد بعدها:** `${live_bal:.2f}`\n"
+        f"📅 **وقت الخروج:** `{close_data.get('exit_time','')[:16]} UTC`"
     )
     await _notify(ctx, msg)
     log.info(f"Position closed: {trade['symbol']} pnl={close_data['pnl']:+.2f}")
