@@ -193,6 +193,30 @@ class BingX:
                 }
         return None
 
+    def get_api_tradeable_symbols(self):
+        """
+        Returns a set of symbols (X/USDT format) where both apiStateBuy and
+        apiStateSell are enabled (=1).  Used to skip restricted symbols before
+        placing orders — avoids error 100421.
+        """
+        try:
+            r = requests.get(
+                f"{BINGX_BASE}/openApi/spot/v1/common/symbols", timeout=15
+            )
+            if r.status_code != 200:
+                return None   # None → caller will skip the filter
+            data = r.json()
+            tradeable = set()
+            for sym in data.get('data', {}).get('symbols', []):
+                # apiStateBuy / apiStateSell: 1 = allowed, 0 = blocked
+                if (int(sym.get('apiStateBuy', 0)) == 1 and
+                        int(sym.get('apiStateSell', 0)) == 1):
+                    # Convert BingX format  X-USDT  →  X/USDT
+                    tradeable.add(sym['symbol'].replace('-', '/'))
+            return tradeable
+        except Exception:
+            return None   # on any error → skip the filter (safe fallback)
+
     def adjust_qty(self, symbol, qty):
         """Round quantity to exchange precision"""
         filters = self.get_symbol_filters(symbol)

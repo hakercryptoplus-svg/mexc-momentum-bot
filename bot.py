@@ -394,8 +394,15 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     log.info(f"Signal detected: {signal['symbol']} pump={signal['pump']}%")
     trade, error = scanner.execute_trade(signal, live_bal)
     if error:
-        log.error(f"Trade failed: {error}")
-        await _notify(ctx, f"❌ فشل التداول\n{signal['symbol']}: {error}")
+        if error.startswith("__SKIP_100421__"):
+            # الرمز ممنوع من API — تخطّى بصمت، لا تنبيه للمستخدم
+            blocked_sym = error.replace("__SKIP_100421__", "")
+            log.warning(f"Skipped API-blocked symbol: {blocked_sym} (100421)")
+            st['last_scan_date'] = today
+            save_state(st)
+        else:
+            log.error(f"Trade failed: {error}")
+            await _notify(ctx, f"❌ فشل التداول\n{signal['symbol']}: {error}")
         return
     st['balance'] = live_bal
     st['position'] = trade

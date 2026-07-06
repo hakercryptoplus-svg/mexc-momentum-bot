@@ -17,7 +17,19 @@ class Scanner:
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         signals = []
 
+        # ── فلتر رموز API ──────────────────────────────────────────────────
+        # نجلب من BingX قائمة الرموز المسموحة للتداول عبر API (apiStateBuy=1)
+        # مرة واحدة قبل المسح لتجنب خطأ 100421 عند محاولة الشراء.
+        # إذا فشل الطلب → tradeable_set = None → نتجاهل الفلتر (آمن).
+        tradeable_set = self.m.get_api_tradeable_symbols()
+        skipped = []
+
         for sym in COINS:
+            # تخطّى الرموز الممنوعة من API مع تسجيل اسمها
+            if tradeable_set is not None and sym not in tradeable_set:
+                skipped.append(sym)
+                continue
+
             raw = self.m.get_klines(sym, '1d', 3)
             if not raw or 'error' in raw or not isinstance(raw, list) or len(raw) < 2:
                 continue
@@ -41,6 +53,10 @@ class Scanner:
 
             time.sleep(0.08)
 
+        if skipped:
+            import logging
+            logging.info(f"[Scanner] تم تخطّى {len(skipped)} رمز ممنوع من API: {', '.join(skipped)}")
+
         if not signals:
             return None
 
@@ -60,6 +76,10 @@ class Scanner:
 
         result = self.m.market_buy(sym, invest)
         if 'error' in result:
+            err_code = result.get('error')
+            # 100421 = رمز ممنوع من API — ليس خطأ حقيقياً، فقط تخطّاه
+            if err_code == 100421:
+                return None, f"__SKIP_100421__{sym}"
             return None, f"فشل الشراء: {result.get('msg', result)}"
 
         # ── استخراج السعر والكمية من استجابة BingX ──
