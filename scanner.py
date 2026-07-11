@@ -61,7 +61,7 @@ class Scanner:
             return None
 
         signals.sort(key=lambda x: x['pump'], reverse=True)
-        return signals[0]
+        return signals   # ترجّع القائمة كاملة مرتبة (الأقوى أولاً)
 
     def execute_trade(self, signal, balance):
         """Place market buy with 100% of balance"""
@@ -72,7 +72,7 @@ class Scanner:
         if actual_balance < 1:
             return None, "الرصيد أقل من 1 USDT"
 
-        invest = actual_balance
+        invest = actual_balance * 0.995   # اترك 0.5% هامش للعمولة والتقريب
 
         result = self.m.market_buy(sym, invest)
         if 'error' in result:
