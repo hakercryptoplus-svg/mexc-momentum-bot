@@ -458,33 +458,132 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
 
     scanner = Scanner(bingx, st)
     trade = st['position']
-    action = scanner.check_tp_sl(trade)  # قد يعدّل trade مباشرة (trail_activated, sl, trail_time)
+    sym = trade['symbol']
+    oco_id = trade.get('oco_id')
 
-    # ── Trailing تفعّل للتو ──
-    if action == 'TRAIL':
-        st['position'] = trade          # احفظ التغييرات (trail_activated=True, sl جديد)
-        save_state(st)
-        log.info(f"Trailing activated: {trade['symbol']} SL → ${trade['sl']:.6f}")
-        await _notify(ctx,
-            f"🛡️ **Trailing Stop مفعّل!**\n{'─'*25}\n"
-            f"🔹 **العملة:** `{trade['symbol']}`\n"
-            f"📌 **سعر الدخول:** `${trade['entry_price']:.6f}`\n"
-            f"✅ **السعر لمس +1%** — وقف الخسارة تحرّك إلى سعر الدخول\n"
-            f"🛑 **SL الجديد:** `${trade['sl']:.6f}` (Breakeven)\n"
-            f"🎯 **TP:** `${trade['tp']:.6f}` (+2%)\n\n"
-            f"🔒 رأس المال محمي — الآن إما ربح أو تعادل"
-        )
+    # ══════════════════════════════════════════════════
+    # الحالة أ: عندنا OCO نشط على المنصة → استعلم عن حالته
+    # ══════════════════════════════════════════════════
+    if oco_id and trade.get('oco_active'):
+        oco_status = bingx.query_oco(oco_id)
+
+        # تحقق: هل تنفذ أي أمر (TP أو SL)؟
+        # ⚠️ عدّل قراءة الحالة حسب شكل استجابة BingX الفعلي
+        filled = False
+        exit_reason = None
+        exit_price = None
+
+        if isinstance(oco_status, dict) and 'error' not in oco_status:
+            orders = oco_status.get('orders', []) or oco_status.get('data', [])
+            for o in orders:
+                if str(o.get('status', '')).upper() == 'FILLED':
+                    filled = True
+                    exit_price = float(o.get('price') or o.get('avgPrice') or 0)
+                    # لو سعر التنفيذ قريب من TP = ربح، غير كذا = وقف خسارة
+                    exit_reason = 'TP' if exit_price >= trade['entry_price'] else 'SL'
+                    break
+
+        if filled:
+            # الصفقة أُغلقت على المنصة — سجّلها وأبلغ المستخدم
+            pnl_pct = (exit_price / trade['entry_price'] - 1) * 100
+            buy_fee = trade['usdt_invested'] * 0.001
+            sell_rev = exit_price * trade['qty'] * (1 - 0.001)
+            pnl = sell_rev - trade['usdt_invested'] - buy_fee
+
+            trade.update({
+                'exit_price': exit_price,
+                'pnl': round(pnl, 2),
+                'pnl_pct': round(pnl_pct, 2),
+                'result': exit_reason,
+                'exit_time': datetime.now(timezone.utc).isoformat(),
+                'status': 'CLOSED',
+            })
+            st.setdefault('trades', []).append(trade)
+            st['position'] = None
+            live_bal = bingx.get_balance('USDT')
+            st['balance'] = live_bal
+            if live_bal > st.get('peak_balance', 0):
+                st['peak_balance'] = live_bal
+            save_state(st)
+
+            icon = '✅' if pnl > 0 else '❌'
+            label = '🎯 جني أرباح (TP)' if exit_reason == 'TP' else '🛑 وقف خسارة (SL)'
+            await _notify(ctx,
+                f"{icon} **صفقة مقفلة — {label}**\n{'─'*25}\n"
+                f"🔹 **العملة:** `{sym}`\n"
+                f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
+                f"🔄 **الخروج:** `${exit_price:.6f}`\n"
+                f"📊 **النتيجة:** `{pnl:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
+                f"💵 **الرصيد:** `${live_bal:.2f}`\n"
+                f"🤖 نُفّذ تلقائياً على المنصة (OCO)"
+            )
+            log.info(f"OCO filled: {sym} {exit_reason} pnl={pnl:+.2f}")
+            return
+
+        # ── الترلينغ: هل السعر لمس +1%؟ ننقل الـ SL لنقطة الدخول ──
+        if not trade.get('trail_activated'):
+            current = bingx.get_price(sym)
+            trail_trigger = trade['entry_price'] * 1.01
+            if current >= trail_trigger:
+                # 1) ألغِ الـ OCO القديم
+                cancel_res = bingx.cancel_oco(sym, oco_id)
+                if 'error' in cancel_res:
+                    log.error(f"فشل إلغاء OCO للترلينغ: {cancel_res.get('msg')}")
+                    return  # نجرب المرة الجاية
+
+                # 2) حط OCO جديد: نفس الـ TP، بس الـ SL على نقطة الدخول (Breakeven)
+                adjusted_qty = bingx.adjust_qty(sym, trade['qty'])
+                new_tp = trade['entry_price'] * 1.02
+                new_sl_trigger = trade['entry_price']            # Breakeven
+                new_sl_limit = trade['entry_price'] * 0.998       # هامش تنفيذ بسيط
+
+                new_oco = bingx.place_oco(sym, adjusted_qty, new_tp, new_sl_trigger, new_sl_limit)
+                if 'error' in new_oco:
+                    log.error(f"فشل حجز OCO الجديد للترلينغ: {new_oco.get('msg')}")
+                    # حالة حرجة: لا OCO الآن — فعّل مراقبة يدوية طوارئ
+                    trade['oco_active'] = False
+                    trade['oco_id'] = None
+                    st['position'] = trade
+                    save_state(st)
+                    return
+
+                trade['oco_id'] = new_oco.get('orderListId') or new_oco.get('orderListID')
+                trade['trail_activated'] = True
+                trade['sl'] = new_sl_trigger
+                trade['trail_time'] = datetime.now(timezone.utc).isoformat()
+                st['position'] = trade
+                save_state(st)
+
+                await _notify(ctx,
+                    f"🛡️ **Trailing Stop مفعّل!**\n{'─'*25}\n"
+                    f"🔹 **العملة:** `{sym}`\n"
+                    f"✅ السعر لمس +1% — وقف الخسارة تحرّك لسعر الدخول\n"
+                    f"🛑 **SL الجديد:** `${new_sl_trigger:.6f}` (Breakeven)\n"
+                    f"🎯 **TP:** `${new_tp:.6f}` (+2%)\n"
+                    f"🔒 رأس المال محمي — إما ربح أو تعادل"
+                )
+                log.info(f"Trailing activated via OCO swap: {sym}")
         return
 
-    if action == 'HOLD': return
+    # ══════════════════════════════════════════════════
+    # الحالة ب: ما فيه OCO (فشل حجزه) → مراقبة يدوية (الكود القديم)
+    # ══════════════════════════════════════════════════
+    action = scanner.check_tp_sl(trade)
 
-    # ── إغلاق الصفقة (TP / SL / BE) ──
-    log.info(f"Closing position: {trade['symbol']} -> {action}")
+    if action == 'TRAIL':
+        st['position'] = trade
+        save_state(st)
+        await _notify(ctx, f"🛡️ Trailing مفعّل (يدوي): {sym}")
+        return
 
+    if action == 'HOLD':
+        return
+
+    # إغلاق يدوي (TP/SL/BE)
     close_data, error = scanner.close_trade(trade, action)
     if error:
         log.error(f"Close failed: {error}")
-        await _notify(ctx, f"⚠️ فشل إغلاق الصفقة\n{trade['symbol']}: {error}")
+        await _notify(ctx, f"⚠️ فشل إغلاق الصفقة\n{sym}: {error}")
         return
 
     trade.update(close_data)
@@ -498,18 +597,13 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
 
     icon = '🔄' if action == 'BE' else ('✅' if close_data['pnl'] > 0 else '❌')
-    action_label = {'TP': '🎯 جني أرباح', 'SL': '🛑 وقف خسارة', 'BE': '🔄 تعادل (Breakeven)'}.get(action, action)
-    msg = (
-        f"{icon} **صفقة مقفلة — {action_label}**\n{'─'*25}\n"
-        f"🔹 **العملة:** `{trade['symbol']}`\n"
-        f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
-        f"🔄 **الخروج:** `${close_data['exit_price']:.6f}`\n"
-        f"📊 **النتيجة:** `{close_data['pnl']:+.2f} USDT` ({close_data['pnl_pct']:+.2f}%)\n"
-        f"💵 **الرصيد بعدها:** `${live_bal:.2f}`\n"
-        f"📅 **وقت الخروج:** `{close_data.get('exit_time','')[:16]} UTC`"
+    await _notify(ctx,
+        f"{icon} **صفقة مقفلة (يدوي)**\n{'─'*25}\n"
+        f"🔹 {sym} | خروج: `${close_data['exit_price']:.6f}`\n"
+        f"📊 `{close_data['pnl']:+.2f} USDT` ({close_data['pnl_pct']:+.2f}%)\n"
+        f"💵 الرصيد: `${live_bal:.2f}`"
     )
-    await _notify(ctx, msg)
-    log.info(f"Position closed: {trade['symbol']} pnl={close_data['pnl']:+.2f}")
+    log.info(f"Position closed (manual): {sym} pnl={close_data['pnl']:+.2f}")
 
 
 async def _notify(ctx, msg):

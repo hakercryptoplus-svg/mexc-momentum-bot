@@ -143,6 +143,41 @@ class BingX:
         return self._get("/openApi/spot/v1/trade/openOrders", params, signed=True)
 
     # ========= Trading =========
+    def place_oco(self, symbol, quantity, tp_price, sl_trigger, sl_limit):
+        """
+        أمر OCO للبيع: TP (limit) + SL (stop-limit) في أمر واحد.
+        أول ما ينفذ واحد، المنصة تلغي الثاني تلقائياً.
+
+        ⚠️ تحقق من أسماء الـ params من وثائق BingX الرسمية:
+        قد تكون: aboveType/belowType, limitPrice/stopPrice/stopLimitPrice
+        """
+        s = self._fmt(symbol)
+        return self._post("/openApi/spot/v1/trade/order/oco", {
+            'symbol': s,
+            'side': 'SELL',
+            'quantity': str(quantity),
+            'limitPrice': str(round(tp_price, 8)),      # سعر جني الربح (TP)
+            'triggerPrice': str(round(sl_trigger, 8)),  # سعر تفعيل وقف الخسارة
+            'stopLimitPrice': str(round(sl_limit, 8)),  # سعر تنفيذ وقف الخسارة
+        })
+
+    def cancel_oco(self, symbol, order_list_id):
+        """إلغاء أمر OCO كامل عبر orderListId"""
+        s = self._fmt(symbol)
+        return self._post("/openApi/spot/v1/trade/oco/cancel", {
+            'symbol': s,
+            'orderListId': str(order_list_id),
+        })
+
+    def query_oco(self, order_list_id):
+        """
+        استعلام حالة أمر OCO. نستخدمه لمعرفة هل تنفذ TP أو SL.
+        يرجّع حالة الأوامر: FILLED / CANCELED / PENDING
+        """
+        return self._get("/openApi/spot/v1/trade/oco/orderList", {
+            'orderListId': str(order_list_id),
+        }, signed=True)
+
     def market_buy(self, symbol, quote_qty):
         s = self._fmt(symbol)
         return self._post("/openApi/spot/v1/trade/order", {

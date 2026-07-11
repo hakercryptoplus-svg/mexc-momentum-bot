@@ -121,6 +121,24 @@ class Scanner:
             'status': 'OPEN'
         }
 
+        # ── احجز OCO فوراً بعد الشراء: TP +2% / SL -1% ──
+        adjusted_qty = self.m.adjust_qty(sym, qty)
+        tp_price = avg_price * 1.02          # +2%
+        sl_trigger = avg_price * 0.99        # -1% (سعر التفعيل)
+        sl_limit = avg_price * 0.985         # هامش بسيط تحت التفعيل لضمان التنفيذ
+
+        oco_result = self.m.place_oco(sym, adjusted_qty, tp_price, sl_trigger, sl_limit)
+
+        if 'error' in oco_result:
+            # فشل حجز OCO — نرجع للمراقبة اليدوية (polling) كخطة بديلة
+            import logging
+            logging.warning(f"[OCO] فشل حجز الأمر لـ {sym}: {oco_result.get('msg')} — سيتم الاعتماد على المراقبة اليدوية")
+            trade['oco_id'] = None
+        else:
+            # خزّن orderListId عشان نقدر نلغيه لاحقاً عند الترلينغ
+            trade['oco_id'] = oco_result.get('orderListId') or oco_result.get('orderListID')
+            trade['oco_active'] = True
+
         return trade, None
 
     def check_tp_sl(self, trade):
