@@ -376,8 +376,9 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
         log.warning(f"Balance too low: ${live_bal}")
         # فحص الإشارات أولاً (بدون شراء) عشان ننبش لو في فرصة ضايعة
         scanner = Scanner(bingx, st)
-        signal = scanner.scan()
-        if signal:
+        signals = scanner.scan()
+        if signals:
+            signal = signals[0]
             await _notify(ctx, f"💰 تم العثور على إشارة!\n"
                                f"🔹 {signal['symbol']} | Pump: {signal['pump']:+.1f}%\n"
                                f"⚠️ لكن الرصيد `$0.00` — تعذر الشراء\n"
@@ -385,24 +386,43 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
         else:
             log.info("No signals found (balance: $0)")
         return
-    signal = scanner.scan()
-    if not signal:
+    signals = scanner.scan()
+    if not signals:
         st['last_scan_date'] = today
         save_state(st)
         log.info(f"No signals found for {today}")
         return
-    log.info(f"Signal detected: {signal['symbol']} pump={signal['pump']}%")
-    trade, error = scanner.execute_trade(signal, live_bal)
-    if error:
+
+    # جرّب الإشارات بالترتيب (الأقوى أولاً) — لو فشلت وحدة، انتقل للي بعدها
+    trade = None
+    skipped_syms = []
+    for signal in signals:
+        log.info(f"Trying signal: {signal['symbol']} pump={signal['pump']}%")
+        trade, error = scanner.execute_trade(signal, live_bal)
+
+        if not error:
+            break   # نجحت الصفقة — اطلع من اللوب
+
+        # الرمز ممنوع من API (100421) → تخطّاه بصمت وجرّب التالي
         if error.startswith("__SKIP_100421__"):
-            # الرمز ممنوع من API — تخطّى بصمت، لا تنبيه للمستخدم
             blocked_sym = error.replace("__SKIP_100421__", "")
             log.warning(f"Skipped API-blocked symbol: {blocked_sym} (100421)")
-            st['last_scan_date'] = today
-            save_state(st)
-        else:
-            log.error(f"Trade failed: {error}")
-            await _notify(ctx, f"❌ فشل التداول\n{signal['symbol']}: {error}")
+            skipped_syms.append(blocked_sym)
+            trade = None
+            continue
+
+        # أي خطأ آخر → سجّله وجرّب التالي بدل ما توقف اليوم كله
+        log.error(f"Trade failed on {signal['symbol']}: {error} — trying next")
+        skipped_syms.append(signal['symbol'])
+        trade = None
+        continue
+
+    # لو ما نجحت أي صفقة بعد تجربة كل الإشارات
+    if trade is None:
+        st['last_scan_date'] = today
+        save_state(st)
+        if skipped_syms:
+            log.warning(f"All {len(skipped_syms)} signals failed/skipped today: {', '.join(skipped_syms)}")
         return
     st['balance'] = live_bal
     st['position'] = trade
