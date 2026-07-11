@@ -460,28 +460,36 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     trade = st['position']
     sym = trade['symbol']
     oco_id = trade.get('oco_id')
+    oco_order_ids = trade.get('oco_order_ids') or []
 
     # ══════════════════════════════════════════════════
-    # الحالة أ: عندنا OCO نشط على المنصة → استعلم عن حالته
+    # الحالة أ: عندنا OCO نشط على المنصة → استعلم عن حالة كل ساق
     # ══════════════════════════════════════════════════
-    if oco_id and trade.get('oco_active'):
-        oco_status = bingx.query_oco(oco_id)
-
-        # تحقق: هل تنفذ أي أمر (TP أو SL)؟
-        # ⚠️ عدّل قراءة الحالة حسب شكل استجابة BingX الفعلي
+    # ⚠️ حسب توثيق BingX الرسمي: GET /openApi/spot/v1/oco/orderList لا
+    # يرجّع status لكل ساق — فقط orderId لكل واحد. لمعرفة هل تنفذ TP أو SL
+    # فعلياً، نستعلم عن كل orderId على حدة عبر query_order()
+    # (GET /openApi/spot/v1/trade/query) الذي يرجّع status + type + السعر.
+    if oco_id and trade.get('oco_active') and len(oco_order_ids) >= 1:
         filled = False
         exit_reason = None
         exit_price = None
 
-        if isinstance(oco_status, dict) and 'error' not in oco_status:
-            orders = oco_status.get('orders', []) or oco_status.get('data', [])
-            for o in orders:
-                if str(o.get('status', '')).upper() == 'FILLED':
-                    filled = True
-                    exit_price = float(o.get('price') or o.get('avgPrice') or 0)
-                    # لو سعر التنفيذ قريب من TP = ربح، غير كذا = وقف خسارة
-                    exit_reason = 'TP' if exit_price >= trade['entry_price'] else 'SL'
-                    break
+        for oid in oco_order_ids:
+            order_status = bingx.query_order(sym, oid)
+            if not isinstance(order_status, dict) or 'error' in order_status:
+                continue  # فشل الاستعلام عن هذا الساق — جرّب الساق الآخر
+            if str(order_status.get('status', '')).upper() == 'FILLED':
+                filled = True
+                executed_qty = float(order_status.get('executedQty') or 0)
+                quote_qty = float(order_status.get('cummulativeQuoteQty') or 0)
+                if executed_qty > 0 and quote_qty > 0:
+                    exit_price = quote_qty / executed_qty
+                else:
+                    exit_price = float(order_status.get('price') or 0)
+                # type == 'LIMIT' هو ساق جني الربح (TP)، وأي نوع آخر
+                # (TAKE_STOP_LIMIT) هو ساق وقف الخسارة (SL) — مؤكد من التوثيق.
+                exit_reason = 'TP' if str(order_status.get('type', '')).upper() == 'LIMIT' else 'SL'
+                break
 
         if filled:
             # الصفقة أُغلقت على المنصة — سجّلها وأبلغ المستخدم
@@ -525,10 +533,13 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
             current = bingx.get_price(sym)
             trail_trigger = trade['entry_price'] * 1.01
             if current >= trail_trigger:
-                # 1) ألغِ الـ OCO القديم
-                cancel_res = bingx.cancel_oco(sym, oco_id)
-                if 'error' in cancel_res:
-                    log.error(f"فشل إلغاء OCO للترلينغ: {cancel_res.get('msg')}")
+                # 1) ألغِ مجموعة الـ OCO القديمة
+                # ⚠️ حسب التوثيق الرسمي: POST /openApi/spot/v1/oco/cancel يُلغي
+                # المجموعة كاملة بتمرير orderId لأي ساق من الساقين — وليس
+                # orderListId ولا symbol.
+                cancel_res = bingx.cancel_oco(oco_order_ids[0])
+                if not isinstance(cancel_res, dict) or 'error' in cancel_res:
+                    log.error(f"فشل إلغاء OCO للترلينغ: {cancel_res}")
                     return  # نجرب المرة الجاية
 
                 # 2) حط OCO جديد: نفس الـ TP، بس الـ SL على نقطة الدخول (Breakeven)
@@ -538,16 +549,26 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
                 new_sl_limit = trade['entry_price'] * 0.998       # هامش تنفيذ بسيط
 
                 new_oco = bingx.place_oco(sym, adjusted_qty, new_tp, new_sl_trigger, new_sl_limit)
-                if 'error' in new_oco:
-                    log.error(f"فشل حجز OCO الجديد للترلينغ: {new_oco.get('msg')}")
-                    # حالة حرجة: لا OCO الآن — فعّل مراقبة يدوية طوارئ
+                new_orders = new_oco.get('orders') if isinstance(new_oco, dict) else None
+                new_order_ids = [o.get('orderId') for o in new_orders if o.get('orderId')] if new_orders else []
+                new_order_list_id = new_oco.get('orderListId') if isinstance(new_oco, dict) else None
+
+                if 'error' in new_oco or not new_order_list_id or len(new_order_ids) < 2:
+                    log.error(f"فشل حجز OCO الجديد للترلينغ: {new_oco}")
+                    # حالة حرجة: لا OCO الآن — فعّل مراقبة يدوية طوارئ فوراً
                     trade['oco_active'] = False
                     trade['oco_id'] = None
+                    trade['oco_order_ids'] = []
                     st['position'] = trade
                     save_state(st)
+                    await _notify(ctx,
+                        f"⚠️ **تنبيه**: فشل تحديث OCO للترلينغ على `{sym}` بعد إلغاء القديم!\n"
+                        f"تم التحويل للمراقبة اليدوية مؤقتاً — راقب الصفقة يدوياً."
+                    )
                     return
 
-                trade['oco_id'] = new_oco.get('orderListId') or new_oco.get('orderListID')
+                trade['oco_id'] = new_order_list_id
+                trade['oco_order_ids'] = new_order_ids
                 trade['trail_activated'] = True
                 trade['sl'] = new_sl_trigger
                 trade['trail_time'] = datetime.now(timezone.utc).isoformat()
