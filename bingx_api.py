@@ -147,7 +147,7 @@ class BingX:
         s = self._fmt(symbol)
         return self._post("/openApi/spot/v1/trade/order", {
             'symbol': s, 'side': 'BUY', 'type': 'MARKET',
-            'quoteOrderQty': str(round(quote_qty, 5))
+            'quoteOrderQty': str(int(quote_qty * 100) / 100)   # تقريب لأسفل — ما يتجاوز الرصيد أبداً
         })
 
     def market_sell(self, symbol, qty):
