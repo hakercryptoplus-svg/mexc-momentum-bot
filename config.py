@@ -9,6 +9,7 @@ BINGX_SECRET_KEY = os.getenv('BINGX_SECRET_KEY')
 
 # === Trading Params ===
 MIN_PUMP = float(os.getenv('MIN_PUMP', '5.0'))          # Minimum pump % to trigger signal
+MAX_PUMP = float(os.getenv('MAX_PUMP', '12.0'))         # سقف الـ pump — فوقه العملة "مفجورة زيادة"، نتجاهلها
 TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', '1.02'))    # +2%
 STOP_LOSS = float(os.getenv('STOP_LOSS', '0.99'))        # -1%
 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # 100% of balance

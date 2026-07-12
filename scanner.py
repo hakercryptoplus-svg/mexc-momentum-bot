@@ -3,7 +3,7 @@ Scanner — Check for pump signals and execute trades
 """
 import time
 from datetime import datetime, timezone
-from config import MIN_PUMP, COINS, FEE
+from config import MIN_PUMP, MAX_PUMP, COINS, FEE
 
 class Scanner:
     def __init__(self, exchange, state, notify_func=None):
@@ -40,7 +40,7 @@ class Scanner:
             yesterday = df[-2]
             pump = (yesterday['close'] - yesterday['open']) / yesterday['open'] * 100
 
-            if pump >= MIN_PUMP:
+            if MIN_PUMP <= pump <= MAX_PUMP:
                 today_candle = df[-1]
                 entry_price = today_candle['open']
 

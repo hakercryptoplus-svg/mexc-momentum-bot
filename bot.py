@@ -434,17 +434,36 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
     # نسبة الاستثمار من الرصيد قبل الشراء (live_bal) — لا من الرصيد بعده (يكون قريب من صفر)
     pct_used = min((trade['usdt_invested'] / live_bal) * 100, 100) if live_bal else 100
+
+    # حالة حماية OCO — نوضّحها صراحة عشان تعرف من التلقرام مباشرة
+    if trade.get('oco_active') and trade.get('oco_id'):
+        protect = (
+            f"🛡️ **الحماية:** OCO محجوز على المنصة ✅\n"
+            f"   (BingX تنفّذ TP/SL تلقائياً حتى لو البوت نايم)\n"
+            f"   رقم الأمر: `{trade['oco_id']}`"
+        )
+    else:
+        protect = (
+            f"⚠️ **الحماية:** OCO فشل — مراقبة يدوية كل 5 دقائق\n"
+            f"   (تحقق من الأوامر المفتوحة في BingX احتياطاً)"
+        )
+
     msg = (
-        f"🚀 **صفقة جديدة!**\n{'─'*25}\n"
+        f"🚀 **صفقة جديدة!**\n{'─'*28}\n"
         f"🔹 **العملة:** `{trade['symbol']}`\n"
-        f"📊 **Pump:** `{signal['pump']:+.1f}%`\n"
-        f"📌 **الدخول:** `${trade['entry_price']:.6f}`\n"
+        f"📊 **الارتفاع (Pump):** `{signal['pump']:+.1f}%` "
+        f"{'🟢 ضمن النطاق' if signal['pump'] <= 12 else '🔴 مرتفع'}\n"
+        f"📌 **سعر الدخول:** `${trade['entry_price']:.6f}`\n"
         f"📦 **الكمية:** `{trade['qty']:.6f}` {trade['symbol'].split('/')[0]}\n"
-        f"💰 **المستثمر:** `${trade['usdt_invested']:.2f}` ({pct_used:.0f}% من الرصيد)\n"
-        f"🎯 **TP:** `${trade['tp']:.6f}` (+2%)\n"
-        f"🛑 **SL أولي:** `${trade['entry_price']*0.99:.6f}` (-1%)\n"
-        f"🔄 **Trailing:** +1% → Breakeven 🛡️\n\n"
-        f"⏳ **مراقبة:** كل 5 دقائق"
+        f"💰 **المبلغ المستثمر:** `${trade['usdt_invested']:.2f}` "
+        f"({pct_used:.0f}% من رصيدك)\n"
+        f"{'─'*28}\n"
+        f"🎯 **هدف الربح (TP):** `${trade['tp']:.6f}` → **+2%**\n"
+        f"🛑 **وقف الخسارة (SL):** `${trade['entry_price']*0.99:.6f}` → **-1%**\n"
+        f"🔄 **الوقف المتحرك:** لما يوصل +1%، الوقف ينتقل لسعر الدخول "
+        f"(بعدها إما ربح أو تعادل، بدون خسارة) 🛡️\n"
+        f"{'─'*28}\n"
+        f"{protect}"
     )
     await _notify(ctx, msg)
     log.info(f"Trade executed: {trade['symbol']} @ ${trade['entry_price']:.6f}")
@@ -618,11 +637,22 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
     save_state(st)
 
     icon = '🔄' if action == 'BE' else ('✅' if close_data['pnl'] > 0 else '❌')
+    action_label = {
+        'TP': '🎯 تحقق هدف الربح (+2%)',
+        'SL': '🛑 وقف الخسارة (-1%)',
+        'BE': '🔄 خروج بتعادل (Breakeven — بدون ربح أو خسارة)'
+    }.get(action, action)
+
+    result_word = 'ربح' if close_data['pnl'] > 0 else ('خسارة' if close_data['pnl'] < 0 else 'تعادل')
+
     await _notify(ctx,
-        f"{icon} **صفقة مقفلة (يدوي)**\n{'─'*25}\n"
-        f"🔹 {sym} | خروج: `${close_data['exit_price']:.6f}`\n"
-        f"📊 `{close_data['pnl']:+.2f} USDT` ({close_data['pnl_pct']:+.2f}%)\n"
-        f"💵 الرصيد: `${live_bal:.2f}`"
+        f"{icon} **تم إغلاق الصفقة**\n{'─'*28}\n"
+        f"📋 **السبب:** {action_label}\n"
+        f"🔹 **العملة:** `{sym}`\n"
+        f"🔄 **خرجنا بسعر:** `${close_data['exit_price']:.6f}`\n"
+        f"💵 **النتيجة:** {result_word} `{close_data['pnl']:+.2f} USDT` "
+        f"({close_data['pnl_pct']:+.2f}%)\n"
+        f"💰 **رصيدك الآن:** `${live_bal:.2f}`"
     )
     log.info(f"Position closed (manual): {sym} pnl={close_data['pnl']:+.2f}")
 
