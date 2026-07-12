@@ -121,6 +121,34 @@ class Scanner:
             'status': 'OPEN'
         }
 
+        # ── احجز OCO فوراً بعد الشراء: TP +2% / SL -1% ──
+        # الأسماء والمسارات هنا مؤكدة من توثيق BingX الرسمي (انظر تعليقات
+        # place_oco في bingx_api.py) — وليست تخميناً.
+        adjusted_qty = self.m.adjust_qty(sym, qty)
+        tp_price = avg_price * 1.02          # +2%
+        sl_trigger = avg_price * 0.99        # -1% (سعر التفعيل)
+        sl_limit = avg_price * 0.985         # هامش بسيط تحت التفعيل لضمان التنفيذ
+
+        oco_result = self.m.place_oco(sym, adjusted_qty, tp_price, sl_trigger, sl_limit)
+
+        orders = oco_result.get('orders') if isinstance(oco_result, dict) else None
+        order_ids = [o.get('orderId') for o in orders if o.get('orderId')] if orders else []
+        order_list_id = oco_result.get('orderListId') if isinstance(oco_result, dict) else None
+
+        if 'error' in oco_result or not order_list_id or len(order_ids) < 2:
+            # فشل حجز OCO أو استجابة غير مكتملة — نرجع للمراقبة اليدوية (polling) كخطة بديلة
+            import logging
+            logging.warning(f"[OCO] فشل حجز الأمر لـ {sym}: {oco_result} — سيتم الاعتماد على المراقبة اليدوية")
+            trade['oco_id'] = None
+            trade['oco_order_ids'] = []
+            trade['oco_active'] = False
+        else:
+            # خزّن orderListId (للاستعلام) + orderId لكل ساق (Limit=TP و Stop-Limit=SL)
+            # عشان نقدر نتحقق من حالة كل ساق ونلغي المجموعة لاحقاً عند الترلينغ
+            trade['oco_id'] = order_list_id
+            trade['oco_order_ids'] = order_ids
+            trade['oco_active'] = True
+
         return trade, None
 
     def check_tp_sl(self, trade):

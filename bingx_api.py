@@ -143,6 +143,78 @@ class BingX:
         return self._get("/openApi/spot/v1/trade/openOrders", params, signed=True)
 
     # ========= Trading =========
+    # ── OCO (One-Cancels-the-Other) ──────────────────────────────────────
+    # المصدر: توثيق BingX الرسمي (BingX-API/api-ai-skills →
+    # skills/spot-trade/api-reference.md) — تم التحقق من أسماء الحقول
+    # ومسارات الـ endpoints فعلياً، وليست تخميناً.
+    def place_oco(self, symbol, quantity, tp_price, sl_trigger, sl_limit):
+        """
+        أمر OCO للبيع: أمر Limit (TP) + أمر Stop-Limit (SL) في نفس الوقت.
+        أول ما ينفّذ واحد، BingX تلغي الآخر تلقائياً على مستوى المنصة.
+
+        POST /openApi/spot/v1/oco/order
+        Params مؤكدة من التوثيق الرسمي: symbol, side, quantity,
+        limitPrice, triggerPrice, orderPrice (وليست stopLimitPrice).
+
+        الاستجابة الناجحة تحتوي:
+          - orderListId: معرّف المجموعة (نخزنه للاستعلام لاحقاً)
+          - orders: [{symbol, orderId, clientOrderId}, ...] — أمرين فرعيين
+            (Limit + Stop-Limit) نحتاج orderId لكل واحد منهم لإلغاء المجموعة
+            أو لمعرفة حالة كل ساق بشكل منفصل عبر query_order().
+        """
+        s = self._fmt(symbol)
+        return self._post("/openApi/spot/v1/oco/order", {
+            'symbol': s,
+            'side': 'SELL',
+            'quantity': str(quantity),
+            'limitPrice': str(round(tp_price, 8)),      # سعر تنفيذ أمر الـ Limit (TP)
+            'triggerPrice': str(round(sl_trigger, 8)),  # سعر تفعيل أمر الستوب (SL)
+            'orderPrice': str(round(sl_limit, 8)),      # سعر تنفيذ أمر الستوب بعد التفعيل
+        })
+
+    def cancel_oco(self, order_id):
+        """
+        إلغاء مجموعة OCO كاملة.
+
+        POST /openApi/spot/v1/oco/cancel
+        ⚠️ حسب التوثيق الرسمي: الإلغاء يتم عبر orderId (أو clientOrderId)
+        لأحد الأمرين الفرعيين (Limit أو Stop-Limit) — وليس عبر orderListId
+        ولا يحتاج symbol في جسم الطلب. مرّر أي orderId من قائمة
+        trade['oco_order_ids'] المخزّنة عند حجز الـ OCO.
+        """
+        return self._post("/openApi/spot/v1/oco/cancel", {
+            'orderId': str(order_id),
+        })
+
+    def query_oco(self, order_list_id):
+        """
+        استعلام حالة مجموعة OCO عبر orderListId.
+
+        GET /openApi/spot/v1/oco/orderList
+        ⚠️ ملاحظة مهمة من التوثيق الرسمي: هذا الـ endpoint يرجّع فقط
+        orderListId + orders:[{orderId, clientOrderId}] — بدون status لكل
+        ساق على حدة. لمعرفة هل تنفذ TP أو SL فعلياً، يجب استدعاء
+        query_order() على كل orderId من القائمة (انظر check_positions في
+        bot.py). هذه الدالة مفيدة فقط للتأكد من وجود المجموعة/شكلها.
+        """
+        return self._get("/openApi/spot/v1/oco/orderList", {
+            'orderListId': str(order_list_id),
+        }, signed=True)
+
+    def query_order(self, symbol, order_id):
+        """
+        استعلام حالة أمر مفرد — هذا هو المصدر الموثّق لمعرفة:
+        status ('FILLED' / 'CANCELED' / 'NEW' / ...)، type ('LIMIT' يعني
+        ساق TP، 'TAKE_STOP_LIMIT' يعني ساق SL)، والسعر الفعلي للتنفيذ.
+
+        GET /openApi/spot/v1/trade/query
+        """
+        s = self._fmt(symbol)
+        return self._get("/openApi/spot/v1/trade/query", {
+            'symbol': s,
+            'orderId': str(order_id),
+        }, signed=True)
+
     def market_buy(self, symbol, quote_qty):
         s = self._fmt(symbol)
         return self._post("/openApi/spot/v1/trade/order", {
