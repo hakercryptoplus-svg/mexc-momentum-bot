@@ -167,9 +167,9 @@ class BingX:
             'symbol': s,
             'side': 'SELL',
             'quantity': str(quantity),
-            'limitPrice': str(round(tp_price, 8)),      # سعر تنفيذ أمر الـ Limit (TP)
-            'triggerPrice': str(round(sl_trigger, 8)),  # سعر تفعيل أمر الستوب (SL)
-            'orderPrice': str(round(sl_limit, 8)),      # سعر تنفيذ أمر الستوب بعد التفعيل
+            'limitPrice': str(self.adjust_price(symbol, tp_price)),      # سعر تنفيذ أمر الـ Limit (TP)
+            'triggerPrice': str(self.adjust_price(symbol, sl_trigger)),  # سعر تفعيل أمر الستوب (SL)
+            'orderPrice': str(self.adjust_price(symbol, sl_limit)),      # سعر تنفيذ أمر الستوب بعد التفعيل
         })
 
     def cancel_oco(self, order_id):
@@ -297,6 +297,16 @@ class BingX:
         prec = len(str(step).split('.')[-1]) if '.' in str(step) else 0
         adjusted = int(qty / step) * step
         return round(adjusted, prec)
+
+    def adjust_price(self, symbol, price):
+        """Round price down to exchange tickSize precision — بعض العملات
+        (زي CLO) ترفض أسعار OCO بدقة أعلى من tickSize المسموح."""
+        f = self.get_symbol_filters(symbol)
+        if not f: return round(price, 8)
+        tick = f['tickSize']
+        if not tick: return round(price, 8)
+        prec = len(str(tick).split('.')[-1]) if '.' in str(tick) else 0
+        return round(int(price / tick) * tick, prec)
 
     def check_symbol(self, symbol):
         """Verify symbol exists on BingX"""

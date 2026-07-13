@@ -124,7 +124,15 @@ class Scanner:
         # ── احجز OCO فوراً بعد الشراء: TP +2% / SL -1% ──
         # الأسماء والمسارات هنا مؤكدة من توثيق BingX الرسمي (انظر تعليقات
         # place_oco في bingx_api.py) — وليست تخميناً.
-        adjusted_qty = self.m.adjust_qty(sym, qty)
+        # ⚠️ العمولة على الشراء في BingX سبوت تُخصم من العملة المشتراة نفسها،
+        # وليس من USDT. يعني الرصيد الحر الفعلي بعد الشراء أقل من executedQty.
+        # نجيب الرصيد الحر الحقيقي قبل ما نحجز OCO، لأن حجزه بكمية أكبر من
+        # المتاح يرفضه BingX (insufficient balance) ويفشل الـ OCO بالكامل.
+        asset = sym.split('/')[0]
+        time.sleep(1)  # مهلة بسيطة حتى يتحدّث الرصيد بعد الشراء
+        free_qty = self.m._get_asset_balance(asset)
+        sell_qty = min(qty, free_qty) if free_qty > 0 else qty * (1 - FEE)
+        adjusted_qty = self.m.adjust_qty(sym, sell_qty)
         tp_price = avg_price * 1.02          # +2%
         sl_trigger = avg_price * 0.99        # -1% (سعر التفعيل)
         sl_limit = avg_price * 0.985         # هامش بسيط تحت التفعيل لضمان التنفيذ

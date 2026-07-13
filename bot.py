@@ -26,6 +26,7 @@ from config import (
     BINGX_SECRET_KEY,
     SCAN_HOUR,
     SCAN_MINUTE,
+    FEE,
 )
 from state import load as load_state, save as save_state, reset as reset_state
 from bingx_api import BingX
@@ -562,7 +563,12 @@ async def check_positions(ctx: ContextTypes.DEFAULT_TYPE):
                     return  # نجرب المرة الجاية
 
                 # 2) حط OCO جديد: نفس الـ TP، بس الـ SL على نقطة الدخول (Breakeven)
-                adjusted_qty = bingx.adjust_qty(sym, trade['qty'])
+                # ⚠️ نفس مشكلة execute_trade: نستخدم الرصيد الحر الفعلي، مو
+                # trade['qty'] الإجمالية، لأن عمولة الشراء تُخصم من العملة نفسها.
+                asset = sym.split('/')[0]
+                free_qty = bingx._get_asset_balance(asset)
+                sell_qty = min(trade['qty'], free_qty) if free_qty > 0 else trade['qty'] * (1 - FEE)
+                adjusted_qty = bingx.adjust_qty(sym, sell_qty)
                 new_tp = trade['entry_price'] * 1.02
                 new_sl_trigger = trade['entry_price']            # Breakeven
                 new_sl_limit = trade['entry_price'] * 0.998       # هامش تنفيذ بسيط
