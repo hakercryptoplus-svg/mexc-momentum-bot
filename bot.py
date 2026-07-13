@@ -751,6 +751,84 @@ async def set_bingx(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ========== TEST OCO COMMAND ==========
+
+async def test_oco_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """اختبار شامل للـ OCO على مبلغ صغير — يبلّغ بكل خطوة عبر التلقرام"""
+    if update.effective_user.id != TELEGRAM_CHAT_ID: return
+    if not bingx.api_key:
+        await update.message.reply_text("⚠️ اربط BingX API أول بـ /set_bingx")
+        return
+
+    test_sym = 'DOGE/USDT'   # عملة سيولتها عالية ورخيصة للاختبار
+    report = ["🧪 **اختبار OCO — خطوة بخطوة**", "─"*28]
+
+    # ── 1) نجيب السعر الحالي ──
+    price = bingx.get_price(test_sym)
+    if price <= 0:
+        report.append("❌ فشل جلب السعر — توقف الاختبار")
+        await update.message.reply_text("\n".join(report), parse_mode=None)
+        return
+    report.append(f"1️⃣ السعر الحالي لـ {test_sym}: `${price:.6f}` ✅")
+
+    # ── 2) نشتري بمبلغ صغير جداً (~2 دولار) ──
+    test_usdt = 2.0
+    buy = bingx.market_buy(test_sym, test_usdt)
+    if 'error' in buy:
+        report.append(f"❌ فشل الشراء التجريبي:\n`{str(buy)[:250]}`")
+        await update.message.reply_text("\n".join(report), parse_mode=None)
+        return
+    qty = float(buy.get('executedQty') or buy.get('origQty') or 0)
+    report.append(f"2️⃣ شراء تجريبي بـ ${test_usdt}: `{qty}` {test_sym.split('/')[0]} ✅")
+
+    # ── 3) نحاول نحط OCO ونصطاد الخطأ الكامل ──
+    adjusted_qty = bingx.adjust_qty(test_sym, qty)
+    tp_price = price * 1.02
+    sl_trigger = price * 0.99
+    sl_limit = price * 0.985
+    report.append(
+        f"3️⃣ محاولة حجز OCO:\n"
+        f"   الكمية: `{adjusted_qty}`\n"
+        f"   TP (limitPrice): `{tp_price:.6f}`\n"
+        f"   SL trigger: `{sl_trigger:.6f}`\n"
+        f"   SL limit (orderPrice): `{sl_limit:.6f}`"
+    )
+    oco = bingx.place_oco(test_sym, adjusted_qty, tp_price, sl_trigger, sl_limit)
+
+    if 'error' in oco:
+        # ← هنا السبب الحقيقي اللي ندوّر عليه
+        report.append(
+            f"❌ **فشل OCO — هذا هو السبب:**\n"
+            f"`{str(oco)[:400]}`\n"
+            f"{'─'*28}\n"
+            f"📤 صوّر هالرسالة وأرسلها لـ AgentX لتحليلها"
+        )
+    else:
+        order_list_id = oco.get('orderListId')
+        orders = oco.get('orders', [])
+        report.append(
+            f"✅ **نجح OCO!** 🎉\n"
+            f"   orderListId: `{order_list_id}`\n"
+            f"   عدد الأوامر الفرعية: `{len(orders)}`\n"
+            f"   الرد الكامل: `{str(oco)[:250]}`"
+        )
+        # نلغي الـ OCO التجريبي عشان ما يعلّق
+        if orders and orders[0].get('orderId'):
+            cancel = bingx.cancel_oco(orders[0]['orderId'])
+            report.append(f"🔄 إلغاء OCO التجريبي: `{str(cancel)[:120]}`")
+
+    # ── 4) نبيع الكمية التجريبية نتخلص منها ──
+    sell_qty = bingx.adjust_qty(test_sym, bingx._get_asset_balance(test_sym.split('/')[0]))
+    if sell_qty > 0:
+        sell = bingx.market_sell(test_sym, sell_qty)
+        ok = 'error' not in sell
+        report.append(f"4️⃣ بيع الكمية التجريبية: {'✅ تم' if ok else '⚠️ راجع يدوياً'}")
+
+    report.append("─"*28)
+    report.append("🏁 انتهى الاختبار")
+    await update.message.reply_text("\n".join(report), parse_mode=None)
+
+
 # ========== TEST COMMAND ==========
 
 async def test_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -852,6 +930,7 @@ def main():
     app.add_handler(CommandHandler("config", config_cmd))
     app.add_handler(CommandHandler("set_bingx", set_bingx))
     app.add_handler(CommandHandler("test", test_cmd))
+    app.add_handler(CommandHandler("test_oco", test_oco_cmd))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.job_queue.run_daily(scheduled_scan, time=datetime.strptime(f"{SCAN_HOUR:02d}:{SCAN_MINUTE:02d}", "%H:%M").time())
     app.job_queue.run_repeating(check_positions, interval=300, first=30)
