@@ -20,7 +20,7 @@ FEE = float(os.getenv('FEE', '0.001'))                   # BingX spot fee (0.1%)
 DEFAULT_COINS = [
     # — العملات الأساسية (42 عملة — كلها شغالة على BingX) —
     'ADA/USDT', 'ASTER/USDT', 'BEAT/USDT', 'BEL/USDT', 'BNB/USDT',
-    'CHECK/USDT', 'CLO/USDT', 'DN/USDT', 'DOGE/USDT', 'DOT/USDT',
+    'CHECK/USDT', 'DN/USDT', 'DOGE/USDT', 'DOT/USDT',
     'EIGEN/USDT', 'ETH/USDT', 'ETHFI/USDT', 'FIL/USDT', 'HYPE/USDT',
     'INJ/USDT', 'IO/USDT', 'LAB/USDT', 'LTC/USDT', 'MBG/USDT',
     'NEAR/USDT', 'SOL/USDT', 'SUI/USDT', 'TAO/USDT', 'TNSR/USDT',
