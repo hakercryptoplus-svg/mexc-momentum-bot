@@ -214,10 +214,37 @@ class Scanner:
         asset = sym.split('/')[0]
         actual_qty = self._get_asset_balance(asset)
 
-        if actual_qty <= 0:
-            return None, "لا يوجد كمية من العملة"
+        filters = self.m.get_symbol_filters(sym)
+        min_qty = filters['minQty'] if filters else 0
+
+        # ⚠️ الرصيد فعلياً صفر أو أقل من أدنى كمية بيع مسموحة — يعني العملة
+        # خرجت من المحفظة خارج مسار البوت (بيع يدوي على المنصة، أو صفقة أُغلقت
+        # فعلاً في محاولة سابقة ولم يُحفظ ذلك بالحالة). لا يوجد شيء نبيعه، فلا
+        # نستدعي market_sell (BingX ترفضه بخطأ quantity<=0) ولا نكرر المحاولة
+        # للأبد — نسجّل الإغلاق بأفضل تقدير للسعر الحالي حتى تتحرر الصفقة.
+        if actual_qty <= 0 or (min_qty and actual_qty < min_qty):
+            exit_price = self.m.get_price(sym)
+            if exit_price <= 0:
+                return None, f"لا يوجد كمية من العملة والسعر الحالي غير متاح (balance={actual_qty})"
+            buy_fee = trade['usdt_invested'] * FEE
+            sell_rev = exit_price * qty * (1 - FEE)
+            pnl = sell_rev - trade['usdt_invested'] - buy_fee
+            pnl_pct = (exit_price / trade['entry_price'] - 1) * 100
+            return {
+                'exit_price': exit_price,
+                'pnl': round(pnl, 2),
+                'pnl_pct': round(pnl_pct, 2),
+                'result': reason,
+                'exit_time': datetime.now(timezone.utc).isoformat(),
+                'closed_externally': True,   # بيع سابق (يدوي أو OCO) لم يُسجَّل بالحالة
+            }, None
 
         adjusted = self.m.adjust_qty(sym, actual_qty)
+        if adjusted <= 0:
+            # actual_qty كان أكبر من الصفر ومن minQty، لكن التقريب لـ stepSize
+            # أنزله لصفر (حالة نادرة) — نبيع الكمية الأصلية غير المقرّبة بدل
+            # إرسال 0 لـ BingX.
+            adjusted = actual_qty
 
         result = self.m.market_sell(sym, adjusted)
         if 'error' in result:
