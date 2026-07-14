@@ -144,8 +144,30 @@ class Scanner:
         order_list_id = oco_result.get('orderListId') if isinstance(oco_result, dict) else None
 
         if 'error' in oco_result or not order_list_id or len(order_ids) < 2:
-            # فشل حجز OCO أو استجابة غير مكتملة — نرجع للمراقبة اليدوية (polling) كخطة بديلة
+            # ⚠️ فشل ظاهري بس قبل ما نستسلم ونرجع للبيع اليدوي، لازم نتأكد
+            # فعلياً هل الطلب توصّل ونُفّذ على BingX رغم فشل الاستجابة عندنا
+            # (تايم آوت 15 ثانية، انقطاع شبكة، ...) — لأن لو افترضنا الفشل
+            # بالغلط بينما OCO شغّال فعلياً على المنصة، رح نتعارض معه ونحاول
+            # نبيع نفس الكمية يدوياً وهي أصلاً محجوزة بأمر الـ OCO (هذا بالضبط
+            # سبب حالة EIGEN/USDT: BingX نفّذت الـ OCO والـ SL تفعّل، لكن
+            # بوتنا كان يعتقد إنه ما في OCO أساساً ورجع يحاول يبيع يدوي).
             import logging
+            import time as _t
+            _t.sleep(2)  # نعطي BingX وقت كافي تسجّل الطلب لو كان لسا بالطريق
+            verify = self.m.query_open_oco(sym)
+            if verify:
+                real = verify[0]
+                real_orders = real.get('orders', [])
+                real_order_ids = [o.get('orderId') for o in real_orders if o.get('orderId')]
+                real_list_id = real.get('orderListId')
+                if real_list_id and len(real_order_ids) >= 2:
+                    logging.warning(f"[OCO] الاستجابة الأولى فشلت لكن التحقق أثبت إن OCO موجود فعلاً على BingX لـ {sym} — نعتمده")
+                    trade['oco_id'] = real_list_id
+                    trade['oco_order_ids'] = real_order_ids
+                    trade['oco_active'] = True
+                    return trade, None
+
+            # تأكدنا فعلاً إنه ما في OCO على المنصة — نرجع للمراقبة اليدوية (polling) كخطة بديلة
             logging.warning(f"[OCO] فشل حجز الأمر لـ {sym}: {oco_result} — سيتم الاعتماد على المراقبة اليدوية")
             trade['oco_id'] = None
             trade['oco_order_ids'] = []

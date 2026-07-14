@@ -201,6 +201,31 @@ class BingX:
             'orderListId': str(order_list_id),
         }, signed=True)
 
+    def query_open_oco(self, symbol=None):
+        """
+        استعلام كل مجموعات OCO المفتوحة حالياً على الحساب.
+
+        GET /openApi/spot/v1/oco/openOrderList
+
+        ⚠️ نستخدمها للتحقق الفعلي بعد فشل ظاهري بحجز OCO (مثلاً انقطاع
+        اتصال/تايم آوت بعد إرسال الطلب) قبل ما نفترض إنه ما في OCO أساساً.
+        الطلب ممكن يكون توصّل لسيرفر BingX ونُفّذ فعلاً هناك، بينما ضاعت
+        الاستجابة عنا فقط (مهلة الاتصال 15 ثانية بـ _post). لو افترضنا
+        الفشل بهذي الحالة ورجعنا للبيع اليدوي، بنتعارض مع OCO شغّال
+        فعلياً على المنصة (وهذا هو سبب حالة EIGEN/USDT الحقيقية).
+        """
+        r = self._get("/openApi/spot/v1/oco/openOrderList", signed=True)
+        if 'error' in r:
+            return []
+        oco_list = r.get('ocoOrders', []) if isinstance(r, dict) else (r if isinstance(r, list) else [])
+        if symbol:
+            s = self._fmt(symbol)
+            oco_list = [
+                o for o in oco_list
+                if any(order.get('symbol') == s for order in o.get('orders', []))
+            ]
+        return oco_list
+
     def query_order(self, symbol, order_id):
         """
         استعلام حالة أمر مفرد — هذا هو المصدر الموثّق لمعرفة:
