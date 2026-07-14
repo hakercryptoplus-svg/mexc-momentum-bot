@@ -150,6 +150,9 @@ class Scanner:
             trade['oco_id'] = None
             trade['oco_order_ids'] = []
             trade['oco_active'] = False
+            # نخزّن رسالة الخطأ الحقيقية من BingX عشان تظهر بالتلقرام مباشرة —
+            # بدون الحاجة لسجلات Render (ما كلها متاحة دايماً للمستخدم).
+            trade['oco_error'] = str(oco_result)[:300]
         else:
             # خزّن orderListId (للاستعلام) + orderId لكل ساق (Limit=TP و Stop-Limit=SL)
             # عشان نقدر نتحقق من حالة كل ساق ونلغي المجموعة لاحقاً عند الترلينغ

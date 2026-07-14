@@ -444,9 +444,11 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE):
             f"   رقم الأمر: `{trade['oco_id']}`"
         )
     else:
+        oco_err = trade.get('oco_error', 'غير معروف')
         protect = (
             f"⚠️ **الحماية:** OCO فشل — مراقبة يدوية كل 5 دقائق\n"
-            f"   (تحقق من الأوامر المفتوحة في BingX احتياطاً)"
+            f"   (تحقق من الأوامر المفتوحة في BingX احتياطاً)\n"
+            f"   📋 **سبب الفشل من BingX:** `{oco_err}`"
         )
 
     msg = (
