@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import time
 import requests
+from decimal import Decimal
 from urllib.parse import urlencode
 
 BINGX_BASE = "https://open-api.bingx.com"
@@ -314,12 +315,35 @@ class BingX:
         except Exception:
             return None   # on any error → skip the filter (safe fallback)
 
+    @staticmethod
+    def _decimals(step):
+        """
+        عدد الخانات العشرية لقيمة step/tick بشكل موثوق.
+
+        ⚠️ باگ حقيقي تسبب بفشل OCO لعملة WOO/USDT: كنا نحسب عدد الخانات
+        عبر `str(step).split('.')` — بايثون تطبع الأرقام الصغيرة جداً
+        بصيغة علمية (`str(0.00001) == '1e-05'`) بدون أي نقطة عشرية، فكانت
+        `'.' in str(step)` ترجع False والدقة تُحسب صفر خطأً. النتيجة:
+        `round(price, 0)` كانت تقرّب سعر TP/SL الصغير (~0.0126) إلى **صفر**
+        قبل إرساله لـ BingX، والـ API كانت ترفضه بخطأ "required field missing"
+        (BingX تعتبر القيمة 0.0 كأنها غير موجودة أصلاً) — بالضبط رسالة الخطأ
+        اللي وصلت: `LimitPrice`/`OrderPrice` فشلوا بـ required tag.
+
+        الحل: نستخدم Decimal(str(step)) اللي تفهم الصيغة العلمية بشكل صحيح
+        وتعطينا الأس الحقيقي (exponent) بدل الاعتماد على تمثيل str() الخادع.
+        """
+        if not step:
+            return 0
+        d = Decimal(str(step)).normalize()
+        return max(0, -d.as_tuple().exponent)
+
     def adjust_qty(self, symbol, qty):
         """Round quantity to exchange precision"""
         filters = self.get_symbol_filters(symbol)
         if not filters: return qty
         step = filters['stepSize']
-        prec = len(str(step).split('.')[-1]) if '.' in str(step) else 0
+        if not step: return qty
+        prec = self._decimals(step)
         adjusted = int(qty / step) * step
         return round(adjusted, prec)
 
@@ -330,7 +354,7 @@ class BingX:
         if not f: return round(price, 8)
         tick = f['tickSize']
         if not tick: return round(price, 8)
-        prec = len(str(tick).split('.')[-1]) if '.' in str(tick) else 0
+        prec = self._decimals(tick)
         return round(int(price / tick) * tick, prec)
 
     def check_symbol(self, symbol):
